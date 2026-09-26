@@ -118,3 +118,12 @@ build/
 # DO NOT REMOVE ABOVE PATTERNS
 # Add project-specific patterns below
 # ============================================
+# ============================================
+# HALL MONITOR
+# ============================================
+# Supervision state and scratch repos are local only
+.hallmonitor/
+demo/run/
+eval/work/
+__pycache__/
+.pytest_cache/

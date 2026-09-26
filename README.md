@@ -1,68 +1,56 @@
-# IBM Hackathon GitHub Project Template
+# Hall Monitor for IBM Bob
 
-This GitHub project template is for IBM Hackathon projects. It includes pre-configured security files to help prevent accidental credential commits and potential account suspension during the hackathon.
+**Trust Bob's work without re-checking it.**
+- **Rules:** Bob reads the rules from your policy documents, and Hall Monitor enforces them on every action it takes, including on parallel subagents.
+- **Rationalizations:** it names them ("just this once…") and rejects them before anything runs.
+- **Receipts:** every claim Bob makes about its work comes back with receipts: the diff, a fresh test run, and sabotage probes that prove the tests actually check the code.
 
-## 🚀 Quick Start
+TypeSafe's Jev makes every judgment in one cheap parallel call. Uncertain cases escalate to a read-only Bob auditor subagent, and only then to you. A whole supervised session costs about $0.003 of Jev.
 
-1. **Use this template to create your project:**
-   - Click "Use this template" button above and select "Create a new repository"
-   - Name your repository
-   - Click "Create repository"
+See [ARCHITECTURE.md](ARCHITECTURE.md) for how each Bob feature is used and the decision flow.
 
-2. **Clone your new repository:**
+## Use it with Bob
 
-   ```bash
-   git clone https://github.com/HACKATHON-ORG/your-repo-name.git
-   cd your-repo-name
-   ```
+```bash
+python scripts/install.py path/to/your/repo
+```
 
-3. **Set up environment variables:**
+Then:
+1. Open the repo as a **trusted** workspace (hooks respect workspace trust), check **Settings → Hooks** lists the five hooks, and approve the `hall-monitor` MCP server.
+2. Switch to the **🛂 Supervised** mode.
+3. Run `/decisions docs/your-policy.pdf`.
+4. Give Bob the task. Bob declares intents, Hall Monitor judges them, and hooks enforce them.
+5. When Bob is done, it calls `submit_claims`, fixes whatever comes back unverified, and finishes with `/hall-pass` (Bob publishes the report with `create_html_artifact`). `/export-ledger docs/ledger.xlsx` writes the decisions and receipts to Excel with Bob's `office_edit`.
 
-   ```bash
-   # Copy the example file
-   cp .env.example .env
+This installs, under `.bob/`: hooks (`settings.json`), the MCP server (`mcp.json`), two custom modes, four skills, five slash commands, and Plan-mode rules.
 
-   # Edit .env with your actual credentials
-   # Use your preferred editor (nano, vim, code, etc.)
-   nano .env
-   ```
+**First time in real Bob?** Run the 30-minute probe in [PROBE.md](PROBE.md) first. It settles the behaviors Bob's docs leave open, and its screenshots double as the required Bob task evidence.
 
-4. **Verify .gitignore is working:**
+**CI / headless:** `python scripts/headless.py <repo> "<task>"` runs Bob Shell (`bob run --mode supervised --format json`) and exits non-zero unless Receipts verified the work. Under `bob run` every tool is pre-approved, so Hall Monitor is the only gate. `TYPESAFE_API_KEY` must be in the environment Bob runs in. Never commit it.
 
-   ```bash
-   # This should NOT show .env file
-   git status
+## Run the scripted demo (no Bob needed)
 
-   # This should confirm .env is ignored
-   git check-ignore -v .env
-   ```
+```bash
+pip install typesafe-sdk pytest reportlab
+python simulate.py
+```
 
-5. **Start developing!**
+This replays a full supervised session through the real hooks and a real MCP stdio session. Open `demo/run/.hallmonitor/hall-pass.html` to see the result.
 
-## 🔒 Security Features
+## Layout
 
-This template includes:
-
-- **`.gitignore`** - Prevents committing credentials and live session files
-- **`.bobignore`** - Prevents AI assistants from logging credentials
-- **`.env.example`** - Template for your environment variables
-
-## 📋 Before Every Commit
-
-Always run this checklist:
-
-- [ ] Reviewed `git diff` for sensitive data
-- [ ] No hardcoded API keys or passwords
-- [ ] `.env` file is NOT in staged changes
-- [ ] No files with "credential" or "secret" in name
-- [ ] Used environment variables for all credentials
-
-## 🆘 Need Help?
-
-- Read [SECURITY.md](SECURITY.MD) for detailed guidelines
-- Contact hackathon support through mentor channel
-- Ask in the hackathon Slack workspace
-
----
-
-**Remember:** Security is everyone's responsibility. When in doubt, ask for help!
+| Path | Role |
+|---|---|
+| `bob/` | Bob assets: custom modes, skills, slash commands, Plan-mode rules |
+| `hm_hook.py`, `hm_mcp.py` | Entry points Bob launches (hooks, MCP server) |
+| `hallmonitor/policy.py` | Decision engine: expected loss over joint outcomes, value-of-information escalation |
+| `hallmonitor/questions.py` | Every Jev question |
+| `hallmonitor/step.py` | Intent judgment (MCP) and enforcement (PreToolUse), including subagent checks |
+| `hallmonitor/ledger.py` | Decision ledger writes: authority, supersede-never-erase |
+| `hallmonitor/receipts.py` | Claim verification and the escalation ladder |
+| `hallmonitor/plan.py`, `brief.py` | Certified plan gate; briefing |
+| `hallmonitor/report.py` | The Hall Pass HTML report |
+| `hallmonitor/bob.py` | Bob Shell: headless supervised runs and the auditor tier (`last_message`, `stats`) |
+| `scripts/headless.py` | CI gate: supervised `bob run`, exit code from Receipts |
+| `scripts/probe_hook.py`, `scripts/probe_report.py`, `PROBE.md` | Probe kit for the first real-Bob session |
+| `demo/` | Demo repo template (with `docs/security-policy.pdf`) and the scripted scenario |
