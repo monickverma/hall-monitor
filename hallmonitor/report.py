@@ -251,10 +251,14 @@ def write_hall_pass(store):
         if cert:
             lines.append(f'auto-accept at p ≥ {cert["threshold"]:.2f}: wrong at most {cert["upper_bound"]:.1%} '
                          f'with {s["confidence"]:.0%} confidence (n={cert["accepted"]})')
-        for key, label in (("unaided", "without Hall Monitor"), ("aided", "with Hall Monitor")):
-            if (s.get("over_reliance") or {}).get(key):
-                o = s["over_reliance"][key]
-                lines.append(f'reviewers {label} accepted {o["rate"]:.0%} of false claims ({o["reviewers"]} reviewers)')
+        for key, label in (("without", "without Hall Monitor"), ("with", "with Hall Monitor")):
+            p = (s.get("pilot") or {}).get(key)
+            if p:
+                bits = ([f'accepted {p["over_reliance"]:.0%} of false claims'] if p.get("over_reliance") is not None
+                        else []) + ([f'{p["minutes_per_claim"]:.1f} min per claim']
+                                    if p.get("minutes_per_claim") is not None else [])
+                lines.append(f'review pilot, {label}: {", ".join(bits)} '
+                             f'({max(p["reviewers"], p["timed_reviewers"])} reviewers)')
         note = (f'{s["claims"]} claims we seeded ourselves across {s["variants"]} variants, model {s["model"]}'
                 + (f'; {s["label_corrections"]} label corrected after scoring, disclosed' if s["label_corrections"] else "")
                 + (f'; this session ran {jev.MODEL}, so these numbers don\'t apply to it' if s["model"] != jev.MODEL else ""))

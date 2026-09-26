@@ -6,13 +6,11 @@ claims that cite those receipts. Some claims are false by construction; the trut
 down before anything is scored. Receipts judges every variant, and the verdicts are only recorded.
 
 Usage: python eval/seeded.py [--out eval/work]
-Writes eval/truth.json, eval/results.json and review sheets for people (eval/review_unaided.csv,
-eval/review_aided.csv). Then run: python eval/score.py
+Writes eval/truth.json, eval/results.json and the review packet for the human pilot (eval/review/, built
+by eval/review_packet.py). Then run: python eval/score.py
 """
 import argparse
-import csv
 import json
-import random
 import shutil
 import subprocess
 import sys
@@ -22,6 +20,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(HERE))
 from demo.scenario import RATELIMIT, REAL_TEST, SERVICE_WIRED, VACUOUS_TEST, WINDOW_TEST  # noqa: E402
 from hallmonitor import evidence as EV, gitutil, jev, receipts  # noqa: E402
 from hallmonitor.store import Store  # noqa: E402
@@ -169,18 +168,8 @@ def main():
                                                    "claims": rows, "jev_input_tokens": tok,
                                                    "seconds": round(time.time() - t0)}, indent=2), encoding="utf-8")
 
-    # Review sheets for people: a fixed random subset, balanced between true and false claims.
-    rng = random.Random(27)
-    subset = rng.sample([x for x in rows if x["truth"]], 8) + rng.sample([x for x in rows if not x["truth"]], 8)
-    rng.shuffle(subset)
-    for fname, aided in (("review_unaided.csv", False), ("review_aided.csv", True)):
-        with open(HERE / fname, "w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            w.writerow(["id", "claim", "diff_file"] + (["hall_monitor", "reason"] if aided else []) +
-                       ["accept_r1", "accept_r2", "accept_r3"])
-            for x in subset:
-                w.writerow([x["id"], x["claim"], f"eval/work/{x['variant']}.diff"] +
-                           ([x["state"], x["code"] or x["detail"]] if aided else []) + ["", "", ""])
+    import review_packet  # the counterbalanced review packet for the human pilot (eval/review/)
+    review_packet.main()
     print(f"\n{len(rows)} claims ({sum(not x['truth'] for x in rows)} false) in {time.time() - t0:.0f}s, "
           f"{tok:,} Jev input tokens (${jev.cost(tok):.4f}). Now run: python eval/score.py")
 

@@ -130,3 +130,36 @@ def test_notes_are_delivered_on_every_mcp_tool(repo):
     store = Store(repo)
     store.queue_note("Stall 1 (looping on one failure).")
     assert mcp_server.call("list_decisions", {}, store).startswith("Hall Monitor notes before you continue:")
+
+
+# ---------------------------------------------------------------- edits under an approved intent
+
+def fake_low_risk(asked):
+    def ask(state, questions):
+        asked.append(set(questions))
+        out = {}
+        for qid in questions:
+            if qid == "on_task":
+                out[qid] = {"score": 3.0, "confidence": 1.0, "probabilities": {"0": 0.0, "1": 0.0, "2": 0.05, "3": 0.95}}
+            elif qid == "rationalization":
+                out[qid] = {"choice": "none", "confidence": 1.0, "probabilities": {"none": 1.0}}
+            else:  # destructive, violates_*, matches_intent, conflict_*
+                out[qid] = {"noul": 0.97 if qid == "matches_intent" else 0.03}
+        return out, {"input_tokens": 1, "output_tokens": 0, "model": "fake"}
+    return ask
+
+
+def test_edit_under_approved_intent_skips_on_task_and_clashes(repo, monkeypatch):
+    store = Store(repo)
+    store.add_intent({"agent": "subagent-A", "intent": "wire the limiter", "files": ["app/service.py"], "commands": [],
+                      "verdict": "approved", "why": ""})  # another agent's active work: the case that crashed
+    store.add_intent({"agent": "main", "intent": "write tests", "files": ["tests/test_x.py"], "commands": [],
+                      "verdict": "approved", "why": ""})
+    asked = []
+    monkeypatch.setattr(jev, "ask", fake_low_risk(asked))
+    code, _, _ = step.pre_tool({"tool": "write_file", "input": {"path": "tests/test_x.py", "content": "def test(): pass"}},
+                               store)
+    assert code == 0
+    assert not any(q.startswith("conflict_") or q == "on_task" for q in asked[-1])
+    assert "matches_intent" in asked[-1]
+    assert not [e for e in store.events() if e.get("stage") == "error"]

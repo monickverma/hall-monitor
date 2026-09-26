@@ -20,8 +20,5 @@
   "alpha": 0.2,
   "confidence": 0.9,
   "label_corrections": 1,
-  "over_reliance": {
-    "unaided": null,
-    "aided": null
-  }
+  "pilot": {}
 }

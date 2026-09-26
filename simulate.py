@@ -20,6 +20,13 @@ from demo import scenario  # noqa: E402
 from hallmonitor import hook, jev  # noqa: E402
 from hallmonitor.store import Store  # noqa: E402
 
+def clean(text):
+    """Printed output never carries this machine's absolute paths (they contain the local user name)."""
+    for root in {str(HERE.resolve()), str(HERE)}:
+        text = text.replace(root.replace("\\", "\\\\"), "hall-monitor").replace(root, "hall-monitor")
+    return text
+
+
 LABEL = {"allow": "ALLOW", "rebrief": "REBRIEF", "block": "BLOCK", "ask_human": "ASK", "send_back": "SENDBACK",
          "accept": "VERIFIED", "audit": "AUDIT", "brief": "BRIEF", "new_task": "BRIEF", "follow_up": "BRIEF",
          "approved": "APPROVED", "approved_with_note": "NOTED", "rejected": "REJECTED", "record": "RECORDED",
@@ -126,7 +133,7 @@ def main():
                 idx = [int(m) for m in re.findall(r"AUDIT NEEDED for claim (\d+)", text)]
                 print(f"{i:>2}. {'AUDIT':9} {s['label']:<46} -> Bob spawns an explore subagent (claims {idx})")
                 for line in text.splitlines()[:8]:
-                    print(f"      | {line}")
+                    print(clean(f"      | {line}"))
                 rows = json.loads((store.dir / "receipts.json").read_text(encoding="utf-8"))["rows"]
                 notes = {str(k): scenario.audit_for(rows[k]["claim"]) for k in idx}
                 text = mcp.call("submit_claims", {**s["args"], "audit_notes": notes})
@@ -160,7 +167,7 @@ def main():
                          or s.get("mcp") in ("explain_block", "list_evidence")
                          or (lines and lines[0].startswith("Hall Monitor notes"))) else lines[:1]
         for line in show[:12]:
-            print(f"      | {line}")
+            print(clean(f"      | {line}"))
         if after:
             print(after)
     mcp.close()
@@ -172,7 +179,8 @@ def main():
     receipts = store.evidence()
     print(f"\n{len(events)} logged events, {len(receipts)} receipts "
           f"({sum(1 for r in receipts if r['kind'] == 'checkpoint')} checkpoints), {tok:,} Jev input tokens "
-          f"({jev.MODEL}), {time.time() - t0:.0f}s, ${jev.cost(tok):.4f}\nHall Pass: {store.dir / 'hall-pass.html'}")
+          f"({jev.MODEL}), {time.time() - t0:.0f}s, ${jev.cost(tok):.4f}\n"
+          f"Hall Pass: {(store.dir / 'hall-pass.html').relative_to(HERE.resolve()).as_posix()}")
 
 
 if __name__ == "__main__":

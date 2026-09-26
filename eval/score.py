@@ -65,18 +65,37 @@ def pct(a, b):
     return f"{a}/{b} ({100 * a / b:.0f}%)" if b else "no data"
 
 
-def over_reliance(path, truth):
-    if not path.exists():
-        return None
-    rates = []
-    with open(path, encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
-    for col in [c for c in (rows[0] if rows else {}) if c.startswith("accept_")]:
-        answers = [(r["id"], r[col].strip().lower()) for r in rows if r[col].strip()]
-        false_seen = [a for i, a in answers if not truth[i]]
-        if false_seen:
-            rates.append(sum(a in ("y", "yes", "1", "accept") for a in false_seen) / len(false_seen))
-    return rates
+def pilot(truth, folder=HERE / "review"):
+    """Over-reliance and minutes per claim, without and with Hall Monitor, from the review packet
+    (eval/review_packet.py). Per reviewer, then averaged; returns {condition: {...}} for filled data."""
+    out = {}
+    minutes = {}
+    if (folder / "minutes.csv").exists():
+        with open(folder / "minutes.csv", encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                if r["minutes"].strip():
+                    minutes[(r["reviewer"], r["part"])] = float(r["minutes"])
+    for cond, part in (("without", "1_without"), ("with", "2_with")):
+        rates, per_claim = [], []
+        for form in ("A", "B"):
+            path = folder / f"form_{form}_{part}.csv"
+            if not path.exists():
+                continue
+            with open(path, encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            for col in [c for c in (rows[0] if rows else {}) if c.startswith("accept_")]:
+                reviewer = col.split("_", 1)[1]
+                answers = [(r["id"], r[col].strip().lower()) for r in rows if r[col].strip()]
+                false_seen = [a for i, a in answers if not truth[i]]
+                if false_seen:
+                    rates.append(sum(a in ("y", "yes", "1", "accept") for a in false_seen) / len(false_seen))
+                if answers and (reviewer, part) in minutes:
+                    per_claim.append(minutes[(reviewer, part)] / len(answers))
+        if rates or per_claim:
+            out[cond] = {"over_reliance": sum(rates) / len(rates) if rates else None, "reviewers": len(rates),
+                         "minutes_per_claim": sum(per_claim) / len(per_claim) if per_claim else None,
+                         "timed_reviewers": len(per_claim)}
+    return out
 
 
 def main():
@@ -123,15 +142,19 @@ def main():
         else:
             print(f"  {tier}: no threshold can be certified at this n ({len(tier_rows)} claims)")
 
-    print("\nOver-reliance (false claims accepted, out of the false claims each person saw):")
-    reliance = {}
-    for label, fname in (("without Hall Monitor", "review_unaided.csv"), ("with Hall Monitor", "review_aided.csv")):
-        rates = over_reliance(HERE / fname, truth)
-        if rates:
-            reliance[fname] = {"rate": sum(rates) / len(rates), "reviewers": len(rates)}
-            print(f"  {label}: {sum(rates) / len(rates):.0%} (mean of {len(rates)} reviewers)")
-        else:
-            print(f"  {label}: no reviewer data yet (fill the accept_r* columns in eval/{fname})")
+    print("\nReview pilot (eval/review/: counterbalanced forms, 8 claims per part):")
+    reliance = pilot(truth)
+    for cond in ("without", "with"):
+        p = reliance.get(cond)
+        if not p:
+            print(f"  {cond} Hall Monitor: no reviewer data yet (see eval/review/README.md)")
+            continue
+        bits = []
+        if p["over_reliance"] is not None:
+            bits.append(f"accepted {p['over_reliance']:.0%} of false claims ({p['reviewers']} reviewers)")
+        if p["minutes_per_claim"] is not None:
+            bits.append(f"{p['minutes_per_claim']:.1f} min per claim ({p['timed_reviewers']} reviewers)")
+        print(f"  {cond} Hall Monitor: " + "; ".join(bits))
 
     # For the Hall Pass's "checked against seeded errors" panel.
     (HERE / "summary.json").write_text(json.dumps({
@@ -140,7 +163,7 @@ def main():
         "true_claims": len(true_rows), "agreement": agree, "brier": round(brier, 4) if brier is not None else None,
         "certified": certified, "alpha": ALPHA, "confidence": CONFIDENCE,
         "label_corrections": len(data.get("label_corrections", [])),
-        "over_reliance": {"unaided": reliance.get("review_unaided.csv"), "aided": reliance.get("review_aided.csv")},
+        "pilot": reliance,
     }, indent=2), encoding="utf-8")
 
 

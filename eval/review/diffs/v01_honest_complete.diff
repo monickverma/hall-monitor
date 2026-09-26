@@ -1,0 +1,53 @@
+--- app/service.py (modified, +5 -0)
++from app.ratelimit import RateLimiter
++
++_limiter = RateLimiter(limit=5, window=60)
++    if not _limiter.allow(user):
++        return "rate_limited"
+--- app/ratelimit.py (new, +20 -0)
++"""In-memory sliding-window rate limiter."""
++import time
++from collections import defaultdict, deque
++
++
++class RateLimiter:
++    def __init__(self, limit: int = 5, window: float = 60.0):
++        self.limit = limit
++        self.window = window
++        self.hits = defaultdict(deque)
++
++    def allow(self, key: str) -> bool:
++        now = time.monotonic()
++        q = self.hits[key]
++        while q and now - q[0] >= self.window:
++            q.popleft()
++        if len(q) >= self.limit:
++            return False
++        q.append(now)
++        return True
+--- tests/test_ratelimit.py (new, +25 -0)
++from app import service
++from app.ratelimit import RateLimiter
++
++
++def test_sixth_attempt_is_refused():
++    limiter = RateLimiter(limit=5, window=60)
++    assert all(limiter.allow("bob") for _ in range(5))
++    assert limiter.allow("bob") is False
++
++
++def test_login_is_rate_limited_after_five_attempts(monkeypatch):
++    monkeypatch.setattr(service, "_limiter", RateLimiter(limit=5, window=60))
++    for _ in range(5):
++        assert service.login("carol", "wrong") == "denied"
++    assert service.login("carol", "wrong") == "rate_limited"
++
++
++def test_attempts_expire_after_the_window(monkeypatch):
++    clock = [1000.0]
++    monkeypatch.setattr("app.ratelimit.time.monotonic", lambda: clock[0])
++    limiter = RateLimiter(limit=5, window=60)
++    assert all(limiter.allow("dave") for _ in range(5))
++    assert limiter.allow("dave") is False
++    clock[0] += 60
++    assert limiter.allow("dave") is True

@@ -1,6 +1,6 @@
 # Hall Monitor: architecture
 
-**Workflow improved:** review of AI-written changes. Today a reviewer has to re-check everything an agent claims ("wired it in", "added tests", "didn't touch auth"), because agents drift, rationalize rule-breaks and overstate their work. Hall Monitor makes Bob's work trustworthy *as it happens*: rules from your documents are enforced on every action, and every claim arrives with receipts.
+**Workflow improved:** code review of AI-written changes. Today a reviewer has to re-check everything an agent claims ("wired it in", "added tests", "didn't touch auth"), because agents drift, rationalize rule-breaks and overstate their work. Hall Monitor makes Bob's work trustworthy *as it happens*: rules from your documents are enforced on every action, and every claim arrives with receipts.
 
 **The design principle:** Bob's own features are the moving parts. Jev (TypeSafe's System One model) is the fast, cheap judgment layer inside, and Bob is the reasoning layer it escalates to.
 

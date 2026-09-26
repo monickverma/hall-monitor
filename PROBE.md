@@ -13,17 +13,11 @@ Every screenshot you take here doubles as the **Bob task session evidence** the 
 
 ## Steps
 
-1. Copy the demo repo somewhere and make it a git repo:
+1. From the `hall-monitor` folder, create the probe repo. This copies the demo login service to `C:/hm-probe`, makes it a git repo, and installs the **probe** hooks. They record raw payloads and allow everything; the MCP server is installed as normal:
    ```bash
-   python -c "import shutil; shutil.copytree('demo/template', 'C:/hm-probe')"
-   git -C C:/hm-probe init -q
-   git -C C:/hm-probe add -A
-   git -C C:/hm-probe commit -qm init
+   python scripts/setup_demo.py C:/hm-probe --probe
    ```
-2. Install the **probe** hooks. They record raw payloads and allow everything; the MCP server is installed as normal:
-   ```bash
-   python scripts/install.py --probe C:/hm-probe
-   ```
+2. Make sure `TYPESAFE_API_KEY` is set in the environment Bob runs in (for example with `setx`, then restart Bob). Never put it in a file in the repo.
 3. Open `C:/hm-probe` in Bob as a **trusted workspace**, because hooks respect workspace trust. Take these screenshots:
    - **Settings → Hooks** showing the five hooks.
    - **Settings → MCP** showing `hall-monitor` connected with 6 tools.

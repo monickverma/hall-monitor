@@ -195,3 +195,25 @@ def test_prediction_powered_estimate_corrects_the_model():
     line = rq.summarize({"stage": "receipts", "action": "send_back", "verdicts": {"a": "verified", "b": "contradicted"},
                          "codes": {"b": "stale"}, "survived": 2, "mutants": 4})
     assert "1 verified" in line and "stale" in line and "2/4 sabotage" in line
+
+
+def test_review_pilot_scores_each_condition(tmp_path):
+    import csv
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location("score", Path(__file__).resolve().parents[1] / "eval" / "score.py")
+    score = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(score)
+    truth = {"a": True, "b": False, "c": True, "d": False}
+    for name, ids, answers in (("form_A_1_without", "ab", "yy"), ("form_A_2_with", "cd", "yn")):
+        with open(tmp_path / f"{name}.csv", "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["id", "claim", "diff", "accept_r1"])
+            for i, a in zip(ids, answers):
+                w.writerow([i, "claim", "d", a])
+    with open(tmp_path / "minutes.csv", "w", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerows([["reviewer", "form", "part", "minutes"], ["r1", "A", "1_without", "6"],
+                                 ["r1", "A", "2_with", "3"]])
+    p = score.pilot(truth, tmp_path)
+    assert p["without"]["over_reliance"] == 1.0 and p["with"]["over_reliance"] == 0.0  # accepted b; rejected d
+    assert p["without"]["minutes_per_claim"] == 3.0 and p["with"]["minutes_per_claim"] == 1.5

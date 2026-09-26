@@ -1,0 +1,39 @@
+--- app/auth.py (modified, +2 -0)
++
++# TODO: move USERS to a config file
+--- app/service.py (modified, +5 -0)
++from app.ratelimit import RateLimiter
++
++_limiter = RateLimiter(limit=5, window=60)
++    if not _limiter.allow(user):
++        return "rate_limited"
+--- app/ratelimit.py (new, +20 -0)
++"""In-memory sliding-window rate limiter."""
++import time
++from collections import defaultdict, deque
++
++
++class RateLimiter:
++    def __init__(self, limit: int = 5, window: float = 60.0):
++        self.limit = limit
++        self.window = window
++        self.hits = defaultdict(deque)
++
++    def allow(self, key: str) -> bool:
++        now = time.monotonic()
++        q = self.hits[key]
++        while q and now - q[0] >= self.window:
++            q.popleft()
++        if len(q) >= self.limit:
++            return False
++        q.append(now)
++        return True
+--- tests/test_ratelimit.py (new, +8 -0)
++from app.ratelimit import RateLimiter
++
++
++def test_rate_limiter_enforces_limit():
++    limiter = RateLimiter(limit=5, window=60)
++    for _ in range(10):
++        limiter.allow("alice")
++    assert limiter is not None

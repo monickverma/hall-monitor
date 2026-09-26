@@ -44,7 +44,13 @@ def judge(store, action, reason=None, check_match=False, agent="main", agent_tas
         "stated_reason": reason or None,
     }
     ids = [d["id"] for d in decisions]
-    questions = Q.step(ids, bool(reason), check_match, len(others))
+    # An edit under an approved intent (check_match) was already judged on-task and clash-free when the
+    # intent was approved. Asking again only adds noise: in the scripted demo, several small readings
+    # (mismatch 0.20, clash 0.14, ...) added up to a false block. At edit time the questions are whether the
+    # edit does what was declared, and whether its content is destructive or breaks a rule.
+    questions = Q.step(ids, bool(reason), check_match, 0 if check_match else len(others))
+    if check_match:
+        questions.pop("on_task")
     if failed_step and reason:
         state["last_failed_step"] = failed_step
         questions["handles_failure"] = Q.HANDLES_FAILURE
@@ -54,8 +60,9 @@ def judge(store, action, reason=None, check_match=False, agent="main", agent_tas
         "destructive": answers["destructive"]["noul"],
         # max, not noisy-or: many weak, correlated guesses must not add up to a confident violation
         "violates": max(viol.values(), default=0.0),
-        "off_task": jev.p_levels(answers["on_task"], [0, 1]),
     }
+    if "on_task" in answers:
+        risks["off_task"] = jev.p_levels(answers["on_task"], [0, 1])
     pattern = None
     if "rationalization" in answers:
         dist = answers["rationalization"]["probabilities"]
@@ -63,7 +70,8 @@ def judge(store, action, reason=None, check_match=False, agent="main", agent_tas
         pattern = max((k for k in dist if k != "none"), key=dist.get)
     if "matches_intent" in answers:
         risks["mismatch"] = 1 - answers["matches_intent"]["noul"]
-    conflicts = {others[j]["agent"]: answers[f"conflict_{j}"]["noul"] for j in range(len(others))}
+    conflicts = {others[j]["agent"]: answers[f"conflict_{j}"]["noul"] for j in range(len(others))
+                 if f"conflict_{j}" in answers}  # not asked for an edit under an approved intent
     if conflicts:
         risks["conflict"] = max(conflicts.values())
     worlds, reveal = policy.independent(risks, tuple(cfg["uncertain_band"]))
