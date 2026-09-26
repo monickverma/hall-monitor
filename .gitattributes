@@ -1,0 +1,13 @@
+# Text files are stored with LF line endings. Binary files are never converted: a PDF whose line
+# endings get rewritten on checkout is corrupted (the demo's security-policy.pdf must stay byte-exact).
+* text=auto
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.xlsx binary
+*.docx binary
+*.pptx binary
+*.mp4 binary
