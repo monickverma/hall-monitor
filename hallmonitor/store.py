@@ -32,6 +32,19 @@ def is_protected(root, path, base=None):
             return True
     return False
 
+
+def rel_path(root, path, base=None):
+    """`path` the way Hall Monitor compares files: repo-relative, with forward slashes. Bob's edit tools send
+    absolute Windows paths while declare_intent usually gets relative ones (preflight, Sept 27), so both
+    must land on the same name. Resolved like is_protected; a path outside the repo stays absolute."""
+    root = Path(root).resolve()
+    p = Path(str(path).replace("\\", "/"))
+    target = (p if p.is_absolute() else Path(base or root) / p).resolve()
+    try:
+        return target.relative_to(root).as_posix()
+    except ValueError:
+        return target.as_posix()
+
 DEFAULT_CONFIG = {
     "test_command": "python -m pytest -q",
     "claims_file": "CLAIMS.md",
@@ -92,7 +105,7 @@ class Store:
         for k, v in {"goal": None, "base": None, "actions": [], "commands": [], "notes": [],
                      "intents": [], "blocks": [], "flags": [], "off_task_streak": 0,
                      "edit_seq": 0, "edits_since_test": 0, "stalls": 0, "fail_repeats": {},
-                     "failed_step": None, "regression_seen": None, "send_backs": 0,
+                     "failed_step": None, "regression_seen": None, "send_backs": 0, "verified_edit_seq": 0,
                      "uncited_retry_used": False, "last_send_back": None, "pending_audits": {}}.items():
             s.setdefault(k, v)
         return s

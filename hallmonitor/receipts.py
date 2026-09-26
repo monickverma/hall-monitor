@@ -332,6 +332,8 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
             sess["last_send_back"] = None
     # The audits requested this round; only notes for these (same index, same claim) count next time.
     sess["pending_audits"] = {str(a["index"]): a["claim"] for a in audits}
+    if status == "accept":  # the Stop backstop leaves work verified up to here alone (see stop_hook)
+        sess["verified_edit_seq"] = sess["edit_seq"]
     store.save_session(sess)
 
     cps = EV.checkpoints(store.evidence())
@@ -417,7 +419,12 @@ def check_hook(store, text):
 
 
 def stop_hook(store, text):
-    if text:
+    """The backstop for work Bob finishes without submitting claims. Bob's last message is in the Stop
+    payload (probe, Sept 27), but every turn ends in a Stop: judging a recap of verified work, or a turn
+    with no edits (/decisions), put its uncited sentences over a VERIFIED result (preflight, Sept 27) and
+    spent the free retry. So only edits no accepted submission covers make the message a claim."""
+    sess = store.session()
+    if text and sess["edit_seq"] > sess["verified_edit_seq"]:
         result = verify(store, text, source="stop")
         if result["status"] != "accept":
             store.queue_note(message(result))

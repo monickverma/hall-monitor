@@ -14,6 +14,7 @@ import hashlib
 import re
 
 from . import gitutil, payload as P
+from .store import rel_path
 
 FAIL = re.compile(r"\b\d+ (failed|errors?)\b|^FAILED\b|^ERROR\b|Traceback \(most recent call last\)|"
                   r"npm ERR!|command not found|is not recognized as an internal or external command|"
@@ -78,7 +79,7 @@ def record(p, store):
     tool = P.tool(p)
     path, command, _ = P.describe(tool, P.tool_input(p))
     if tool in P.EDIT_TOOLS and path:
-        rel = re.sub(r"^\./", "", str(path).replace("\\", "/"))
+        rel = rel_path(store.root, path, base=P.first(p, "cwd"))
         sess["edit_seq"] += 1
         store.add_evidence({"kind": "edit", "file": rel, "tool": tool, "edit_seq": sess["edit_seq"]})
         if is_code(rel):
