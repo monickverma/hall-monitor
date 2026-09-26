@@ -104,23 +104,38 @@ def main():
             print(f"  MISS [{r['state']}, truth={'true' if r['truth'] else 'false'}, {r['tier']}] {r['id']}: {r['claim']}")
 
     print(f"\nCertified auto-accept thresholds (error <= {ALPHA:.0%} with {CONFIDENCE:.0%} confidence):")
+    certified = {}
     for tier in ("jev", "jev_deep"):
         tier_rows = by_tier.get(tier, [])
         c = certify_threshold(tier_rows)
         if c:
             t, n, k, bound = c
+            certified[tier] = {"threshold": t, "accepted": n, "wrong": k, "upper_bound": bound,
+                               "claims": len(tier_rows)}
             print(f"  {tier}: auto-accept at p(supports) >= {t:.2f}: {k} wrong of {n} accepted "
                   f"(upper bound {bound:.1%}), coverage {n}/{len(tier_rows)}")
         else:
             print(f"  {tier}: no threshold can be certified at this n ({len(tier_rows)} claims)")
 
     print("\nOver-reliance (false claims accepted, out of the false claims each person saw):")
+    reliance = {}
     for label, fname in (("without Hall Monitor", "review_unaided.csv"), ("with Hall Monitor", "review_aided.csv")):
         rates = over_reliance(HERE / fname, truth)
         if rates:
+            reliance[fname] = {"rate": sum(rates) / len(rates), "reviewers": len(rates)}
             print(f"  {label}: {sum(rates) / len(rates):.0%} (mean of {len(rates)} reviewers)")
         else:
             print(f"  {label}: no reviewer data yet (fill the accept_r* columns in eval/{fname})")
+
+    # For the Hall Pass's "checked against seeded errors" panel.
+    (HERE / "summary.json").write_text(json.dumps({
+        "model": data["model"], "claims": len(rows), "false_claims": len(false_rows),
+        "variants": len({r["variant"] for r in rows}), "caught": caught, "false_alarms": alarms,
+        "true_claims": len(true_rows), "agreement": agree, "brier": round(brier, 4) if brier is not None else None,
+        "certified": certified, "alpha": ALPHA, "confidence": CONFIDENCE,
+        "label_corrections": len(data.get("label_corrections", [])),
+        "over_reliance": {"unaided": reliance.get("review_unaided.csv"), "aided": reliance.get("review_aided.csv")},
+    }, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":

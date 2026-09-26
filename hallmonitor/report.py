@@ -5,6 +5,7 @@ page can't claim a feature the session didn't use."""
 import html
 import json
 from collections import Counter
+from pathlib import Path
 
 from . import jev
 
@@ -203,6 +204,57 @@ def write_hall_pass(store):
     tiles = [(len(judged), "actions & intents judged"), (len(stopped), "stopped before they ran"),
              (len(patterns), "rationalizations named"), (rounds, "receipt rounds"),
              (f"${jev.cost(tok):.4f}", f"Jev cost ({tok:,} input tokens, {jev.MODEL})")]
+
+    # Each feedback loop's work this session.
+    loops = [
+        ("plan revisions", sum(1 for x in events if x.get("stage") == "plan" and x.get("action") == "block")),
+        ("re-briefs", sum(1 for x in events if x.get("action") == "rebrief" or x.get("verdict") == "approved_with_note")),
+        ("stalls", sum(1 for x in events if x.get("stage") == "stall")),
+        ("failed steps handled", sum(1 for x in events if x.get("stage") == "intent"
+                                     and (x.get("handles_failure") or 0) >= 0.5)),
+        ("send-backs", sum(1 for x in last_r if x.get("action") in ("send_back", "stuck"))),
+        ("escalations", sum(1 for x in events if x.get("escalated"))),
+        ("asked you", sum(1 for x in events if "ask_human" in (x.get("action"), x.get("verdict")))),
+    ]
+    loops_html = "".join(f'<span class="feat">{e(k)} <b>{v}</b></span>' for k, v in loops)
+
+    stuck_html = ""
+    if status == "stuck" and receipts:
+        from . import receipts as R
+        failing = [r for r in receipts["rows"] if r.get("state") != "verified"]
+        stuck_html = ('<h2>Stuck</h2><section><table>' +
+                      "".join(f'<tr><td>{chip(r["state"])}</td><td>{e(r["claim"])}<div class="why">'
+                              f'{e(r.get("detail") or r.get("code") or "")}</div></td></tr>' for r in failing) +
+                      f'<tr><td class="stage">next</td><td class="why">{e(R.restore_advice(receipts.get("checkpoint")))}'
+                      '</td></tr></table></section>')
+
+    forms_html = ""
+    if (store.dir / "forms.json").exists():
+        f = json.loads((store.dir / "forms.json").read_text(encoding="utf-8"))
+        chips = "".join(f'<span class="feat">{e(k.replace("_", " "))} <b>{v}</b></span>' for k, v in f["forms"].items())
+        forms_html = (f'<h2>Failure forms</h2><div class="why">Jev labels on this session\'s {f["events"]} events '
+                      f'(bulk classification); {f["needs_person"]} flagged for a person.</div>'
+                      f'<div class="feats">{chips or "<span class=feat>none found</span>"}</div>')
+
+    seeded_html = ""
+    seeded = Path(__file__).resolve().parents[1] / "eval" / "summary.json"
+    if seeded.exists():
+        s = json.loads(seeded.read_text(encoding="utf-8"))
+        cert = s["certified"].get("jev")
+        lines = [f'caught {s["caught"]}/{s["false_claims"]} false claims · false alarms {s["false_alarms"]}/'
+                 f'{s["true_claims"]} true claims · agreement {s["agreement"]}/{s["claims"]}']
+        if cert:
+            lines.append(f'auto-accept at p ≥ {cert["threshold"]:.2f}: wrong at most {cert["upper_bound"]:.1%} '
+                         f'with {s["confidence"]:.0%} confidence (n={cert["accepted"]})')
+        for key, label in (("unaided", "without Hall Monitor"), ("aided", "with Hall Monitor")):
+            if (s.get("over_reliance") or {}).get(key):
+                o = s["over_reliance"][key]
+                lines.append(f'reviewers {label} accepted {o["rate"]:.0%} of false claims ({o["reviewers"]} reviewers)')
+        note = (f'{s["claims"]} claims we seeded ourselves across {s["variants"]} variants, model {s["model"]}'
+                + (f'; {s["label_corrections"]} label corrected after scoring, disclosed' if s["label_corrections"] else ""))
+        seeded_html = (f'<h2>Receipts checked against seeded errors</h2><section><table>' +
+                       "".join(f'<tr><td class="why">{e(l)}</td></tr>' for l in lines) +
+                       f'<tr><td class="stage">{e(note)}</td></tr></table></section>')
     page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Hall Pass</title><style>{CSS}</style></head>
 <body><main>
@@ -219,6 +271,10 @@ def write_hall_pass(store):
 <h2>Timeline</h2><section><table>{''.join(rows)}</table></section>
 <h2>Decision ledger</h2><section><table>{''.join(ledger_rows) or '<tr><td>none</td></tr>'}</table></section>
 <h2>Receipts</h2><section><table>{rec or '<tr><td>No claims submitted yet</td></tr>'}</table></section>
+{stuck_html}
+<h2>Loops</h2><div class="feats">{loops_html}</div>
+{forms_html}
+{seeded_html}
 <h2>IBM Bob features in play</h2><div class="feats">{''.join(f'<span class="feat">{e(f)}</span>' for f in feats)}</div>
 </main></body></html>"""
     path = store.dir / "hall-pass.html"

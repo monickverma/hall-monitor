@@ -1,0 +1,17 @@
+{
+  "model": "jev-1.13.0",
+  "events": 42,
+  "sessions": 11,
+  "requests": 42,
+  "seconds": 2.8,
+  "jev_input_tokens": 31156,
+  "cost": 0.00131,
+  "jev_rate_needs_person": 0.635,
+  "ppi": null,
+  "failure_forms_jev": {
+    "none": 23,
+    "inaccurate_self_report": 11,
+    "constraint_violation": 6,
+    "self_initiated_overreach": 2
+  }
+}

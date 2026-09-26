@@ -179,3 +179,19 @@ def test_supervisor_files_are_protected_without_asking_jev(repo):
     for path in (".bob/settings.json", "./.hallmonitor/config.json"):
         code_, _, err = step.pre_tool({"tool": "write_file", "input": {"path": path, "content": "{}"}}, store)
         assert code_ == 2 and "can't be edited" in err
+
+
+# ---------------------------------------------------------------- bulk classification (no Jev)
+
+def test_prediction_powered_estimate_corrects_the_model():
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location("rq", Path(__file__).resolve().parents[1] / "eval" / "review_queue.py")
+    rq = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rq)
+    assert rq.ppi([0.5] * 10, [(0.5, 1)]) is None  # one label is not enough
+    est, low, high = rq.ppi([0.2] * 100, [(0.2, 1)] * 5 + [(0.2, 0)] * 5)
+    assert abs(est - 0.5) < 1e-9 and low < 0.5 < high  # Jev says 20%, the people say half: corrected to 50%
+    line = rq.summarize({"stage": "receipts", "action": "send_back", "verdicts": {"a": "verified", "b": "contradicted"},
+                         "codes": {"b": "stale"}, "survived": 2, "mutants": 4})
+    assert "1 verified" in line and "stale" in line and "2/4 sabotage" in line

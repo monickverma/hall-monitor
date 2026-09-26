@@ -1,0 +1,27 @@
+{
+  "model": "jev-1.13.0",
+  "claims": 60,
+  "false_claims": 22,
+  "variants": 10,
+  "caught": 21,
+  "false_alarms": 3,
+  "true_claims": 38,
+  "agreement": 56,
+  "brier": 0.0372,
+  "certified": {
+    "jev": {
+      "threshold": 0.5,
+      "accepted": 26,
+      "wrong": 1,
+      "upper_bound": 0.14153160802078663,
+      "claims": 36
+    }
+  },
+  "alpha": 0.2,
+  "confidence": 0.9,
+  "label_corrections": 1,
+  "over_reliance": {
+    "unaided": null,
+    "aided": null
+  }
+}
