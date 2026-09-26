@@ -11,7 +11,8 @@ import re
 import time
 from pathlib import Path
 
-from . import jev, payload as P, policy, questions as Q
+from . import evidence, jev, payload as P, policy, questions as Q
+from .store import PROTECTED
 
 
 def _read(root, path, limit=3000):
@@ -21,8 +22,12 @@ def _read(root, path, limit=3000):
         return None
 
 
-def judge(store, action, reason=None, check_match=False, agent="main", agent_task=None, deep=False):
-    """One parallel Jev request over everything that matters for this action, then minimum expected loss."""
+def judge(store, action, reason=None, check_match=False, agent="main", agent_task=None, deep=False,
+          failed_step=None):
+    """One parallel Jev request over everything that matters for this action, then minimum expected loss.
+
+    With `failed_step` (a command that just failed), the same request also asks whether the stated
+    reason deals with that failure (the outcome check)."""
     cfg, sess = store.config(), store.session()
     decisions = store.active_decisions(kind="limit")  # obligations are checked by Receipts
     others = [{"agent": it["agent"], "task": it.get("agent_task"), "intent": it["intent"],
@@ -39,7 +44,11 @@ def judge(store, action, reason=None, check_match=False, agent="main", agent_tas
         "stated_reason": reason or None,
     }
     ids = [d["id"] for d in decisions]
-    answers, usage = jev.ask(state, Q.step(ids, bool(reason), check_match, len(others)))
+    questions = Q.step(ids, bool(reason), check_match, len(others))
+    if failed_step and reason:
+        state["last_failed_step"] = failed_step
+        questions["handles_failure"] = Q.HANDLES_FAILURE
+    answers, usage = jev.ask(state, questions)
     viol = {d: answers[f"violates_{d}"]["noul"] for d in ids}
     risks = {
         "destructive": answers["destructive"]["noul"],
@@ -61,8 +70,11 @@ def judge(store, action, reason=None, check_match=False, agent="main", agent_tas
     cost = cfg["human_cost"] if deep else cfg["escalate_cost"]
     d = policy.decide(worlds, reveal, policy.STEP_HARM, escalate_cost=cost, risks=risks)
     detail = {"violations": viol, "pattern": pattern, "conflicts": conflicts, "tokens": jev.tokens(usage)}
+    if "handles_failure" in answers:
+        detail["handles_failure"] = answers["handles_failure"]["noul"]
     if d.escalate and not deep:  # a closer look with full context is worth its cost
-        d2, detail2 = judge(store, action, reason, check_match, agent, agent_task, deep=True)
+        d2, detail2 = judge(store, action, reason, check_match, agent, agent_task, deep=True,
+                            failed_step=failed_step)
         detail2["tokens"] += detail["tokens"]
         detail2["escalated"] = "deep_look"
         if d2.escalate:
@@ -102,31 +114,62 @@ VERDICT = {"allow": "approved", "rebrief": "approved_with_note", "block": "rejec
 
 
 def declare_intent(store, intent, files=(), commands=(), agent="main", agent_task=None):
-    """MCP tool: judge a plan of action before any tool runs; the answer goes straight back to Bob."""
+    """MCP tool: judge a plan of action before any tool runs; the answer goes straight back to Bob.
+    (Pending notes and flags are put in front of every MCP result by the MCP server.)"""
     t0 = time.time()
+    cfg, sess = store.config(), store.session()
     files = [str(f).replace("\\", "/") for f in files or []]
-    action = {"declared_intent": intent, "files": files, "commands": list(commands or [])}
-    d, detail = judge(store, action, reason=intent, agent=agent, agent_task=agent_task)
+    commands = list(commands or [])
+    target = ", ".join(files + commands)
+    base = {"agent": agent, "agent_task": agent_task, "intent": intent, "files": files, "commands": commands}
+
+    if sess["stalls"] > cfg["stall_limit"]:  # the stall counter passed its limit: stop and ask the user
+        why = (f"- {sess['stalls']} stalls since the last passing checkpoint (the limit is {cfg['stall_limit']}).\n"
+               f"- Restart plan for the user: {evidence.restart_plan(store)}")
+        row = store.add_intent({**base, "verdict": "ask_human", "why": why})
+        store.log({"stage": "intent", "agent": agent, "target": target, "reason": intent[:300],
+                   "action": "ask_human", "verdict": "ask_human", "note": "stall limit",
+                   "ms": int((time.time() - t0) * 1000)})
+        return f"{row['id']} needs the user's decision before you continue:\n{why}\nAsk the user."
+
+    failed = sess["failed_step"]
+    try:
+        d, detail = judge(store, {"declared_intent": intent, "files": files, "commands": commands},
+                          reason=intent, agent=agent, agent_task=agent_task, failed_step=failed)
+    except jev.JevRefused:
+        row = store.add_intent({**base, "verdict": "ask_human", "why": "- Hall Monitor couldn't check this intent."})
+        store.log({"stage": "intent", "agent": agent, "target": target, "reason": intent[:300],
+                   "action": "ask_human", "verdict": "ask_human", "fallback": "jev_refused"})
+        return f"{row['id']}: Hall Monitor couldn't check this; ask the user."
     verdict = VERDICT[d.action]
     why = explain(store, d, detail) if verdict != "approved" else ""
-    row = store.add_intent({"agent": agent, "agent_task": agent_task, "intent": intent, "files": files,
-                            "commands": list(commands or []), "verdict": verdict, "why": why})
-    flags = store.pop_flags()  # e.g. a subagent whose returned work drifted: say so before Bob builds on it
-    prefix = ("Hall Monitor notes before you continue:\n" + "\n".join(f"- {f}" for f in flags) + "\n\n") if flags else ""
-    store.log({"stage": "intent", "agent": agent, "target": ", ".join(files + list(commands or [])),
+    unhandled = failed is not None and detail.get("handles_failure", 1.0) < 0.5
+    if unhandled and verdict == "approved":
+        verdict = "approved_with_note"
+        why = (f"- your last command failed (`{failed['command']}` -> {failed['last_line']}), and this intent "
+               "doesn't say how you'll deal with that")
+    row = store.add_intent({**base, "verdict": verdict, "why": why})
+    if failed is not None and not unhandled:  # the failed step has been dealt with
+        s = store.session()
+        s["failed_step"] = None
+        store.save_session(s)
+    store.log({"stage": "intent", "agent": agent, "target": target,
                "reason": intent[:300], **d.as_dict(), "verdict": verdict,
                "pattern": detail["pattern"] if d.risks.get("rationalizing", 0) >= 0.5 else None,
                "violations": {k: round(v, 3) for k, v in detail["violations"].items()},
                "conflicts": detail["conflicts"], "escalated": detail.get("escalated"),
+               "handles_failure": detail.get("handles_failure"),
                "tokens": detail["tokens"], "ms": int((time.time() - t0) * 1000)})
     if verdict == "approved":
-        return prefix + f"{row['id']} approved. Go ahead: {', '.join(files + list(commands or [])) or 'no files listed'}."
+        return f"{row['id']} approved. Go ahead: {target or 'no files listed'}."
     if verdict == "approved_with_note":
-        return prefix + f"{row['id']} approved, but stay on the goal: {store.session().get('goal')}\n{why}"
+        if unhandled:
+            return f"{row['id']} approved, but deal with the failed step first:\n{why}"
+        return f"{row['id']} approved, but stay on the goal: {store.session().get('goal')}\n{why}"
     if verdict == "ask_human":
-        return prefix + f"{row['id']} needs the user's confirmation before you proceed:\n{why}\nAsk the user."
-    return prefix + (f"{row['id']} REJECTED. Do not do this:\n{why}\n"
-                     "Choose an approach that respects the active decisions, or ask the user to change them.")
+        return f"{row['id']} needs the user's confirmation before you proceed:\n{why}\nAsk the user."
+    return (f"{row['id']} REJECTED. Do not do this:\n{why}\n"
+            "Choose an approach that respects the active decisions, or ask the user to change them.")
 
 
 def pre_tool(p, store):
@@ -137,6 +180,11 @@ def pre_tool(p, store):
 
     if tool in P.SPAWN_TOOLS:
         return spawn_check(p, store)
+    if rel and tool in P.EDIT_TOOLS and re.sub(r"^\./", "", rel).lower().startswith(PROTECTED):
+        store.log({"stage": "step", "tool": tool, "target": rel, "action": "block",
+                   "note": "protected: Hall Monitor's own configuration and records"})
+        return 2, "", ("Hall Monitor: .bob/ and .hallmonitor/ hold Hall Monitor's own configuration and records, "
+                       "so they can't be edited during a supervised task. Ask the user if a change there is needed.")
     if rel and tool in P.EDIT_TOOLS and rel.lower() == cfg["claims_file"].lower():
         from . import receipts
         return receipts.check_hook(store, detail_text)
@@ -161,8 +209,18 @@ def pre_tool(p, store):
 
     t0 = time.time()
     action = {"tool": tool, "target": rel or command, "content": detail_text[:1200]}
-    d, det = judge(store, action, reason=reason, check_match=intent is not None,
-                   agent=intent["agent"] if intent else "main", agent_task=intent.get("agent_task") if intent else None)
+    # A command that is exactly one the approved intent declared matches it by definition: code decides
+    # that, and Jev only checks the action itself (destructive? breaks a rule? on-task?).
+    exact = bool(intent and command and command.strip() in {c.strip() for c in intent.get("commands", [])})
+    try:
+        d, det = judge(store, action, reason=None if exact else reason, check_match=intent is not None and not exact,
+                       agent=intent["agent"] if intent else "main",
+                       agent_task=intent.get("agent_task") if intent else None)
+    except jev.JevRefused:  # decided by code alone: only work an approved intent already covers goes ahead
+        covered = intent is not None and intent["verdict"] in ("approved", "approved_with_note")
+        store.log({"stage": "step", "tool": tool, "target": rel or command, "action": "allow" if covered else "block",
+                   "fallback": "jev_refused", "note": "Jev couldn't check this; decided by code"})
+        return (0, "", "") if covered else (2, "", "Hall Monitor couldn't check this action; ask the user.")
     sess = store.session()
     sess["actions"].append({"tool": tool, "target": rel or command, "decision": d.action})
     store.save_session(sess)
@@ -194,7 +252,12 @@ def spawn_check(p, store):
     n = sum(1 for it in store.session()["intents"] if it.get("source") == "spawn") + 1
     name = P.first(inp, "name", "title", default=None) or f"{kind}-subagent-{n}"
     action = {"tool": "spawn_subagent", "subagent_type": kind, "brief": brief_text[:1500]}
-    d, det = judge(store, action, reason=brief_text, agent=name, agent_task=brief_text)
+    try:
+        d, det = judge(store, action, reason=brief_text, agent=name, agent_task=brief_text)
+    except jev.JevRefused:
+        store.log({"stage": "spawn", "agent": name, "target": f"{kind}: {brief_text[:120]}", "action": "block",
+                   "fallback": "jev_refused"})
+        return 2, "", f"Hall Monitor couldn't check the brief for {name}; ask the user."
     verdict = VERDICT[d.action]
     why = explain(store, d, det) if verdict != "approved" else ""
     store.add_intent({"agent": name, "agent_task": brief_text[:600], "intent": brief_text[:600], "files": [],
@@ -217,30 +280,29 @@ def subagent_return(p, store):
     summary = P.tool_output(p)
     if not summary.strip():
         return 0, "", ""
-    answers, usage = jev.ask({"goal": store.session().get("goal"), "assigned_task": brief_text[:1500],
-                              "subagent_summary": summary[:3000]},
-                             {"serves": Q.SUBAGENT_SERVES, "drifted": Q.SUBAGENT_DRIFTED})
+    try:
+        answers, usage = jev.ask({"goal": store.session().get("goal"), "assigned_task": brief_text[:1500],
+                                  "subagent_summary": summary[:3000]},
+                                 {"serves": Q.SUBAGENT_SERVES, "drifted": Q.SUBAGENT_DRIFTED})
+    except jev.JevRefused:
+        store.add_flag(f"Hall Monitor couldn't check what the {kind} subagent returned; review it before building on it.")
+        return 0, "", ""
     off = jev.p_levels(answers["serves"], [0, 1])
     drift = answers["drifted"]["noul"]
     flagged = off >= 0.5 or drift >= 0.6
     store.log({"stage": "subagent_return", "agent": kind, "target": brief_text[:120],
                "action": "flag" if flagged else "accept", "risks": {"off_goal": off, "drifted": drift},
                "tokens": jev.tokens(usage), "ms": int((time.time() - t0) * 1000)})
-    if flagged:
-        msg = (f"A {kind} subagent's result may have drifted from its task \"{brief_text[:100]}\" "
-               f"(drifted p={drift:.2f}, off-goal p={off:.2f}). Check its changes before building on them.")
-        store.add_flag(msg)
-        store.queue_note(msg)
+    if flagged:  # delivered once, at the top of the next MCP result or the next briefing
+        store.add_flag(f"A {kind} subagent's result may have drifted from its task \"{brief_text[:100]}\" "
+                       f"(drifted p={drift:.2f}, off-goal p={off:.2f}). Check its changes before building on them.")
     return 0, "", ""
 
 
 def post_tool(p, store):
+    """PostToolUse can't block or talk back. Spawns get the return check; edits and commands become
+    receipts in the evidence ledger (which also drives checkpoints and the stall counter)."""
     if P.tool(p) in P.SPAWN_TOOLS:
         return subagent_return(p, store)
-    sess = store.session()
-    tool = P.tool(p)
-    path, command, _ = P.describe(tool, P.tool_input(p))
-    if command:
-        sess["commands"].append({"command": command, "output": P.tool_output(p)[-800:]})
-    store.save_session(sess)
+    evidence.record(p, store)
     return 0, "", ""

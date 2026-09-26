@@ -1,19 +1,28 @@
-"""The Hall Pass: one self-contained HTML page per session, built from .hallmonitor/ state."""
+"""The Hall Pass: one self-contained HTML page per session, built from .hallmonitor/ state.
+
+Everything on it comes from the session's own log, including the list of Bob features in play, so the
+page can't claim a feature the session didn't use."""
 import html
 import json
 from collections import Counter
 
-PRICE_PER_M = 0.042  # $/1M Jev tokens, as observed in TypeSafe's rerank cookbook; an estimate
+from . import jev
 
 CHIP = {"allow": ("ok", "allowed"), "approved": ("ok", "approved"), "accept": ("ok", "verified"),
         "rebrief": ("warn", "rebriefed"), "approved_with_note": ("warn", "noted"), "audit": ("warn", "audit"),
         "block": ("bad", "blocked"), "rejected": ("bad", "rejected"), "send_back": ("bad", "sent back"),
         "ask_human": ("warn", "ask human"), "record": ("info", "recorded"), "reject": ("bad", "rejected"),
         "brief": ("info", "briefed"), "new_task": ("info", "new task"), "follow_up": ("info", "briefed"),
-        "flag": ("warn", "flagged"), "done": ("info", "done"), "success": ("ok", "success")}
+        "flag": ("warn", "flagged"), "done": ("info", "done"), "success": ("ok", "success"),
+        "needs_evidence": ("warn", "needs evidence"), "stuck": ("bad", "stuck"), "verified": ("ok", "verified"),
+        "contradicted": ("bad", "contradicted"), "cant_check": ("warn", "can't check")}
 STAGE = {"session_start": "Session", "brief": "Briefing", "ledger": "Decision", "plan": "Plan gate",
          "intent": "Intent", "step": "Tool call", "receipts": "Receipts", "spawn": "Subagent spawn",
-         "subagent_return": "Subagent return", "bob_run": "Bob Shell"}
+         "subagent_return": "Subagent return", "bob_run": "Bob Shell", "stall": "Stall"}
+STATE_ORDER = {"contradicted": 0, "needs_evidence": 1, "cant_check": 2, "verified": 3}
+# Which hook each logged stage came through.
+HOOK_OF = {"session_start": "SessionStart", "brief": "UserPromptSubmit", "step": "PreToolUse", "plan": "PreToolUse",
+           "spawn": "PreToolUse", "subagent_return": "PostToolUse", "stall": "PostToolUse"}
 
 CSS = """
 :root{--bg:#f6f4ef;--card:#fffdf8;--ink:#1d1b16;--muted:#6b665c;--line:#e4dfd3;--ok:#1f7a4d;--okbg:#e3f3ea;
@@ -44,7 +53,7 @@ tr:last-child td{border-bottom:0}th{font-size:12px;color:var(--muted);font-weigh
 .target{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;word-break:break-all}
 .pattern{font-weight:700;color:var(--bad)}s{color:var(--muted)}
 .feats{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.feat{border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:13px}
-.ladder{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.rung{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--card)}
+.ladder{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.rung{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--card)}
 .rung b{font-size:22px}.rung span{display:block;color:var(--muted);font-size:12px}
 @media (max-width:640px){.pass{grid-template-columns:1fr}.ladder{grid-template-columns:repeat(2,1fr)}.hide-sm{display:none}}
 """
@@ -106,18 +115,32 @@ def write_hall_pass(store):
     last_r = [x for x in events if x.get("stage") == "receipts"]
     rounds = len(last_r)
     status = (last_r[-1]["action"] if last_r else "in_progress")
-    stamp = {"accept": ("ok", "VERIFIED"), "send_back": ("bad", "SENT BACK"), "audit": ("warn", "AUDITING")}.get(
+    stamp = {"accept": ("ok", "VERIFIED"), "send_back": ("bad", "SENT BACK"), "audit": ("warn", "AUDITING"),
+             "needs_evidence": ("warn", "NEEDS EVIDENCE"), "stuck": ("bad", "STUCK")}.get(
         status, ("warn", "IN PROGRESS"))
+    receipts_rows = store.evidence()
+    cps = [r for r in receipts_rows if r["kind"] == "checkpoint"]
     ladder = Counter()
     for x in events:
         if x.get("stage") in ("intent", "step"):
             ladder[{"deep_look": "deep", "human": "human"}.get(x.get("escalated"), "jev")] += 1
         for t in x.get("tiers") or []:
-            ladder[{"jev": "jev", "jev+audit": "bob", "jev_deep": "deep", "bob_shell_audit": "bob"}[t]] += 1
+            ladder[{"code": "code", "jev": "jev", "jev+audit": "bob", "jev_deep": "deep", "bob_shell_audit": "bob"}.get(t, "jev")] += 1
 
-    feats = ["Lifecycle hooks (SessionStart · UserPromptSubmit · PreToolUse · PostToolUse · Stop)",
-             f"MCP server: {len(mcp_calls)} calls (declare_intent · explain_block · record_decision · submit_claims · hall_pass)",
-             "Custom modes: 🛂 Supervised · 🔎 Receipts Auditor (no edit group)"]
+    feats = []
+    hooks_seen = {HOOK_OF[x["stage"]] for x in events if x.get("stage") in HOOK_OF}
+    if receipts_rows:
+        hooks_seen.add("PostToolUse")
+    if any(x.get("stage") == "receipts" and x.get("source") == "stop" for x in events):
+        hooks_seen.add("Stop")
+    order = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"]
+    if hooks_seen:
+        feats.append("Lifecycle hooks: " + " · ".join(h for h in order if h in hooks_seen))
+    if mcp_calls:
+        names = list(dict.fromkeys(x.get("tool") for x in mcp_calls if x.get("tool")))
+        feats.append(f"MCP server: {len(mcp_calls)} calls ({' · '.join(names)})")
+    if receipts_rows:
+        feats.append(f"Evidence ledger: {len(receipts_rows) - len(cps)} receipts, {len(cps)} checkpoints")
     if any(x.get("stage") in ("spawn", "subagent_return") for x in events):
         feats.append("spawn_subagent supervised: briefs checked before start, summaries on return")
     runs = [x for x in events if x.get("stage") == "bob_run"]
@@ -156,18 +179,30 @@ def write_hall_pass(store):
 
     rec = ""
     if receipts:
-        rec = "".join(f'<tr><td>{chip("accept" if r["action"] == "accept" else r["action"])}</td>'
-                      f'<td>{e(r["claim"])}<div class="why">{e(r["verdict"])} ({r["confidence"]}) · judged by '
-                      f'{e({"jev": "Jev", "jev_deep": "Jev deep look", "jev+audit": "Jev + explore-subagent audit", "bob_shell_audit": "Jev + Bob Shell auditor"}.get(r["tier"], r["tier"]))}</div></td></tr>'
-                      for r in receipts["rows"])
+        judged_by = {"jev": "Jev", "jev_deep": "Jev deep look", "jev+audit": "Jev + explore-subagent audit",
+                     "bob_shell_audit": "Jev + Bob Shell auditor", "code": "code (no Jev needed)"}
+        for r in sorted(receipts["rows"], key=lambda r: STATE_ORDER.get(r.get("state"), 9)):
+            bits = [f"judged by {judged_by.get(r['tier'], r['tier'])}"]
+            if r.get("cited"):
+                bits.append("cites " + ", ".join(r["cited"]))
+            if r.get("code") and r["code"] != "code":
+                bits.append(f"reason: {r['code']}")
+            if r.get("detail") and r.get("state") != "verified":
+                bits.append(r["detail"])
+            rec += (f'<tr><td>{chip(r.get("state", r["action"]))}</td><td>{e(r["claim"])}'
+                    f'<div class="why">{e(" · ".join(bits))}</div></td></tr>')
         s = receipts["sabotage"]
-        rec += (f'<tr><td class="stage">evidence</td><td class="why">tests '
-                f'{"pass" if receipts["tests"]["passed"] else "FAIL"} · sabotage {s["killed"]}/{s["mutants"]} '
+        rec += (f'<tr><td class="stage">evidence</td><td class="why">fresh test run '
+                f'{"passes" if receipts["tests"]["passed"] else "FAILS"} · sabotage {s["killed"]}/{s["mutants"]} '
                 f'mutants killed</td></tr>')
+        if cps:
+            rec += (f'<tr><td class="stage">checkpoints</td><td class="why">'
+                    f'{e(", ".join(c["checkpoint"] + " (from " + c["from"] + ")" for c in cps))} · restore: '
+                    f'<span class="target">git checkout {e(cps[-1]["ref"])} -- .</span></td></tr>')
 
     tiles = [(len(judged), "actions & intents judged"), (len(stopped), "stopped before they ran"),
              (len(patterns), "rationalizations named"), (rounds, "receipt rounds"),
-             (f"${tok * PRICE_PER_M / 1e6:.4f}", f"Jev cost ({tok:,} tokens)")]
+             (f"${jev.cost(tok):.4f}", f"Jev cost ({tok:,} input tokens, {jev.MODEL})")]
     page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Hall Pass</title><style>{CSS}</style></head>
 <body><main>
@@ -176,6 +211,7 @@ def write_hall_pass(store):
 <div class="stamp {stamp[0]}" style="color:var(--{stamp[0]})">{stamp[1]}<small>RECEIPTS</small></div></div>
 <div class="tiles">{''.join(f'<div class="tile"><b>{e(v)}</b><span>{e(k)}</span></div>' for v, k in tiles)}</div>
 <h2>Escalation ladder</h2><div class="ladder">
+<div class="rung"><b>{ladder['code']}</b><span>decided by code (no Jev)</span></div>
 <div class="rung"><b>{ladder['jev']}</b><span>Jev, one parallel request</span></div>
 <div class="rung"><b>{ladder['deep']}</b><span>Jev deep look (full evidence)</span></div>
 <div class="rung"><b>{ladder['bob']}</b><span>Bob explore-subagent audit</span></div>
@@ -188,5 +224,5 @@ def write_hall_pass(store):
     path = store.dir / "hall-pass.html"
     path.write_text(page, encoding="utf-8")
     summary = (f"{len(judged)} actions/intents judged, {len(stopped)} stopped, {len(patterns)} rationalizations "
-               f"named, receipts: {stamp[1]}, Jev cost ${tok * PRICE_PER_M / 1e6:.4f}")
+               f"named, receipts: {stamp[1]}, Jev cost ${jev.cost(tok):.4f}")
     return str(path), summary

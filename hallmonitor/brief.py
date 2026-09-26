@@ -23,14 +23,14 @@ def _brief(store, extra=None):
         lines += [f"- {d['id']}: {d['text']}" + (" (checked when you finish)" if d.get("kind") == "obligation" else "")
                   for d in decisions]
     lines += extra or []
-    notes = store.pop_notes()
+    notes = store.pop_pending()
     if notes:
         lines.append("Hall Monitor findings to address first:")
         lines += [f"- {n}" for n in notes]
     lines.append("Protocol: call hall-monitor declare_intent before any edit or command; if a tool is reported "
-                 "as blocked, call explain_block to learn why; when done, call "
-                 f"submit_claims (or write {cfg['claims_file']}). Claims are checked against the diff, a fresh "
-                 "test run and sabotage probes.")
+                 "as blocked, call explain_block to learn why; when done, call list_evidence, then "
+                 "submit_claims with each claim citing the receipt IDs (E1, E2, ...) that prove it. Claims are "
+                 "checked against those receipts, the diff, a fresh test run and sabotage probes.")
     return "\n".join(lines)[:cfg["max_brief_chars"]]
 
 
@@ -88,6 +88,7 @@ def user_prompt(p, store):
     new_task = sess.get("goal") is None or answers["new_task"]["noul"] >= 0.5
     if new_task:
         sess["goal"] = text[:600]
+    sess["stalls"] = 0  # the user has stepped in: the stall counter starts again
     added = []
     for i, s in enumerate(sents):
         if answers[f"decision_{i}"]["noul"] < 0.6:

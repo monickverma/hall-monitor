@@ -1,9 +1,21 @@
 """Everything Hall Monitor remembers lives in <repo>/.hallmonitor/ as JSON / JSONL."""
+import hashlib
 import json
 import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+from .jev import MODEL
+
+# Every logged event carries the model and a hash of the question wording and the harm table, so a
+# threshold can be traced to the exact wording, harm weights and model it was tuned on (re-run the
+# control set and re-tune after any change to them).
+QHASH = hashlib.sha1(b"".join(Path(__file__).with_name(f).read_bytes()
+                              for f in ("questions.py", "policy.py"))).hexdigest()[:10]
+
+# The agent must never edit its own supervisor. Checked in code, before Jev is asked.
+PROTECTED = (".bob/", ".hallmonitor/")
 
 DEFAULT_CONFIG = {
     "test_command": "python -m pytest -q",
@@ -19,6 +31,9 @@ DEFAULT_CONFIG = {
     "uncertain_band": [0.2, 0.8],  # Jev answers outside this band count as settled
     "max_brief_chars": 1500,
     "max_mutants": 4,
+    "max_send_backs": 2,          # the third send-back makes the task stuck (a verified round resets it)
+    "stall_limit": 2,             # past this many stalls, stop and ask the user (Magentic-One's threshold)
+    "max_edits_without_test": 5,  # this many code edits with no test run counts as a stall
 }
 
 
@@ -60,7 +75,10 @@ class Store:
     def session(self):
         s = self._json("session.json", {})
         for k, v in {"goal": None, "base": None, "actions": [], "commands": [], "notes": [],
-                     "intents": [], "blocks": [], "flags": [], "off_task_streak": 0}.items():
+                     "intents": [], "blocks": [], "flags": [], "off_task_streak": 0,
+                     "edit_seq": 0, "edits_since_test": 0, "stalls": 0, "fail_repeats": {},
+                     "failed_step": None, "regression_seen": None, "send_backs": 0,
+                     "uncited_retry_used": False, "last_send_back": None}.items():
             s.setdefault(k, v)
         return s
 
@@ -146,6 +164,24 @@ class Store:
         self.save_session(s)
         return notes
 
+    def pop_pending(self):
+        """Flags and notes Bob hasn't seen yet, each once. Whichever channel reaches Bob first delivers
+        them: the next MCP result (mid-task) or the next prompt's briefing."""
+        s = self.session()
+        items = list(dict.fromkeys(s["flags"] + s["notes"]))
+        s["flags"], s["notes"] = [], []
+        self.save_session(s)
+        return items
+
+    # evidence ledger: every edit, command and test run Bob makes, numbered E1, E2, ... (append-only)
+    def evidence(self):
+        return self._jsonl("evidence.jsonl")
+
+    def add_evidence(self, row):
+        row = {"id": f"E{len(self.evidence()) + 1}", "t": time.time(), **row}
+        self._append("evidence.jsonl", row)
+        return row
+
     # decision ledger: append-only, decisions are superseded, never overwritten ----------------
     def ledger(self):
         return self._jsonl("ledger.jsonl")
@@ -172,7 +208,7 @@ class Store:
 
     # event log (feeds the dashboard) ------------------------------------------
     def log(self, row):
-        self._append("events.jsonl", {"ts": now(), "t": time.time(), **row})
+        self._append("events.jsonl", {"ts": now(), "t": time.time(), "model": MODEL, "qhash": QHASH, **row})
 
     def events(self):
         return self._jsonl("events.jsonl")

@@ -26,13 +26,18 @@ cannot tell you why; `explain_block` returns Hall Monitor's reason and what to d
 other agents' work before it starts, and checks its summary when it returns. A drifted result is reported
 in your next declare_intent result. Give each subagent a precise task, and in a `general` subagent's task
 add: "Before editing, call declare_intent with agent=<your name> and agent_task=<this task>."</Step>
-<Step>When the task is done, call `submit_claims` with one specific claim per thing you did, e.g. "Added a
-test that fails if the 6th login attempt within a minute is allowed". Each claim is checked against the
-diff, a fresh test run and sabotage probes (the changed code is deliberately broken to see whether your
-tests notice).</Step>
-<Step>Fix every claim that is not verified (or correct the claim) and submit again. If Hall Monitor asks
-for an AUDIT, spawn an `explore` subagent with the brief it gives you and pass the subagent's findings
-back in `audit_notes`.</Step>
+<Step>Hall Monitor records every edit and command you make as a numbered receipt (E1, E2, ...). A passing
+test run also becomes a checkpoint you can go back to. If a command fails, your next `declare_intent` must
+say how you'll deal with the failure.</Step>
+<Step>When the task is done, call `list_evidence`, then call `submit_claims` with one specific claim per
+thing you did, each citing the receipts that prove it, e.g. `{"claim": "Added a test that fails if the 6th
+login attempt within a minute is allowed", "evidence": ["E7", "E9"]}`. For claims about tests, cite a test
+run made after your last edit. Each claim is checked against its receipts, the diff, a fresh test run and
+sabotage probes (the changed code is deliberately broken to see whether your tests notice).</Step>
+<Step>Fix every claim that is not verified (or correct the claim), re-run the tests, and submit again with
+fresh receipts. After two send-backs Hall Monitor stops the repair loop and hands the decision to the user.
+If Hall Monitor asks for an AUDIT, spawn an `explore` subagent with the brief it gives you and pass the
+subagent's findings back in `audit_notes`.</Step>
 <Step>Finish with `/hall-pass`: call `hall_pass`, then publish the report as a shareable one-page summary
 with `create_html_artifact`, and give the user its link and the file path.</Step>
 </Steps>

@@ -39,8 +39,10 @@ def handle(payload):
             path, command, _ = P.describe(P.tool(payload), P.tool_input(payload))
             target = path or command or P.tool(payload)
             store.record_block(P.tool(payload), target, err)
-            store.queue_note(f"Blocked {P.tool(payload)} on {target}: " + err.splitlines()[0][:200] +
-                             " (call explain_block for the full reason)")
+            lines = err.splitlines()
+            reason = next((l[2:] for l in lines if l.startswith("- ")), lines[0])
+            store.queue_note(f"Blocked {P.tool(payload)} on {target}: {reason[:200]} "
+                             "(call explain_block for the full reason)")
         return code, out, err
     except Exception as e:  # supervision must never brick the agent unless configured to
         store.log({"stage": "error", "event": P.event(payload), "error": repr(e),

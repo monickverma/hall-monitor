@@ -17,13 +17,31 @@ from pathlib import Path
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
 from demo import scenario  # noqa: E402
-from hallmonitor import hook  # noqa: E402
+from hallmonitor import hook, jev  # noqa: E402
 from hallmonitor.store import Store  # noqa: E402
 
 LABEL = {"allow": "ALLOW", "rebrief": "REBRIEF", "block": "BLOCK", "ask_human": "ASK", "send_back": "SENDBACK",
          "accept": "VERIFIED", "audit": "AUDIT", "brief": "BRIEF", "new_task": "BRIEF", "follow_up": "BRIEF",
          "approved": "APPROVED", "approved_with_note": "NOTED", "rejected": "REJECTED", "record": "RECORDED",
-         "reject": "REJECTED", "flag": "FLAGGED", "ok": "OK"}
+         "reject": "REJECTED", "flag": "FLAGGED", "ok": "OK", "needs_evidence": "EVIDENCE?", "stuck": "STUCK"}
+
+
+def cite(claims, store):
+    """Resolve the scenario's symbolic citations against the real evidence ledger, as Bob would after
+    calling list_evidence: "@test" is the newest test run, "@edit:<path>" the newest edit of that file."""
+    rows = store.evidence()
+
+    def newest(pred):
+        ids = [r["id"] for r in rows if pred(r)]
+        return ids[-1] if ids else "E0"
+
+    def one(ref):
+        if ref == "@test":
+            return newest(lambda r: r["kind"] == "test")
+        if ref.startswith("@edit:"):
+            return newest(lambda r: r["kind"] == "edit" and r.get("file") == ref[6:])
+        return ref
+    return [{**c, "evidence": [one(x) for x in c["evidence"]]} if isinstance(c, dict) else c for c in claims]
 
 
 class MCP:
@@ -100,6 +118,8 @@ def main():
         n_before = len(store.events())
         after = None
         if "mcp" in s:
+            if s["mcp"] == "submit_claims":
+                s = {**s, "args": {**s["args"], "claims": cite(s["args"]["claims"], store)}}
             text = mcp.call(s["mcp"], s["args"])
             if s["mcp"] == "submit_claims" and "AUDIT NEEDED" in text:
                 ev = store.events()[-1]
@@ -135,8 +155,10 @@ def main():
                 if ret.get("stage") == "subagent_return":
                     after = f"{i:>2}. {LABEL.get(ret['action'], ret['action']):9} {'  …it returns its summary':<46} {summarize(ret)}"
         print(f"{i:>2}. {LABEL.get(action, action):9} {s['label']:<46} {summarize(ev)}")
-        show = lines if (code == 2 or action in ("rejected", "send_back", "reject", "audit", "approved_with_note")
-                         or s.get("mcp") == "explain_block") else lines[:1]
+        show = lines if (code == 2 or action in ("rejected", "send_back", "reject", "audit", "approved_with_note",
+                                                 "needs_evidence", "stuck", "ask_human")
+                         or s.get("mcp") in ("explain_block", "list_evidence")
+                         or (lines and lines[0].startswith("Hall Monitor notes"))) else lines[:1]
         for line in show[:12]:
             print(f"      | {line}")
         if after:
@@ -147,8 +169,10 @@ def main():
     tok = sum(e.get("tokens", 0) for e in events)
     for e in [e for e in events if e.get("stage") == "error"]:
         print("ERROR:", e["error"], "\n", e["trace"])
-    print(f"\n{len(events)} logged events, {tok:,} Jev tokens, {time.time() - t0:.0f}s "
-          f"(~${tok * 0.042 / 1e6:.4f})\nHall Pass: {store.dir / 'hall-pass.html'}")
+    receipts = store.evidence()
+    print(f"\n{len(events)} logged events, {len(receipts)} receipts "
+          f"({sum(1 for r in receipts if r['kind'] == 'checkpoint')} checkpoints), {tok:,} Jev input tokens "
+          f"({jev.MODEL}), {time.time() - t0:.0f}s, ${jev.cost(tok):.4f}\nHall Pass: {store.dir / 'hall-pass.html'}")
 
 
 if __name__ == "__main__":

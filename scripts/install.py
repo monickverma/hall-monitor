@@ -24,7 +24,8 @@ ASSETS = HERE / "bob"
 # when it returns, whether or not hooks fire inside subagents.
 TOOLS = "^(write_file|write_to_file|apply_diff|search_and_replace|insert_content|execute_command|spawn_subagent)$"
 MARKER = "# hall-monitor modes"
-MCP_TOOLS = ["declare_intent", "explain_block", "record_decision", "list_decisions", "submit_claims", "hall_pass"]
+MCP_TOOLS = ["declare_intent", "explain_block", "record_decision", "list_decisions", "list_evidence",
+             "submit_claims", "hall_pass"]
 
 
 def shell_path(p):

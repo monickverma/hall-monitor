@@ -1,11 +1,13 @@
-"""Evidence collection: what changed, a fresh test run, and sabotage probes."""
+"""Evidence collection: what changed, a fresh test run, sabotage probes, and checkpoints."""
+import os
 import re
 import subprocess
 from pathlib import Path
 
 
-def git(root, *args):
-    r = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, encoding="utf-8")
+def git(root, *args, env=None):
+    r = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, encoding="utf-8",
+                       env={**os.environ, **env} if env else None)
     return r.stdout
 
 
@@ -15,6 +17,38 @@ def head(root):
 
 def tracked_files(root):
     return [f for f in git(root, "ls-files").splitlines() if f]
+
+
+def checkpoint(root, n, last_tree=None):
+    """Snapshot the working tree as refs/hallmonitor/C<n>.
+
+    Uses a private index file, then commit-tree and update-ref, so the working tree, the real index and
+    the branch are never touched. Returns {ref, commit, tree}, or None if nothing changed since the
+    last checkpoint (`last_tree`) or this isn't a git repository.
+    """
+    root = Path(root)
+    env = {"GIT_INDEX_FILE": str(root / ".hallmonitor" / "cp.index"),
+           "GIT_AUTHOR_NAME": "Hall Monitor", "GIT_AUTHOR_EMAIL": "hall-monitor@localhost",
+           "GIT_COMMITTER_NAME": "Hall Monitor", "GIT_COMMITTER_EMAIL": "hall-monitor@localhost"}
+    parent = head(root)
+    if parent:
+        git(root, "read-tree", "HEAD", env=env)
+    git(root, "add", "-A", env=env)
+    tree = git(root, "write-tree", env=env).strip()
+    if not tree or tree == last_tree:
+        return None
+    commit = git(root, "commit-tree", tree, "-m", f"hall monitor checkpoint C{n}",
+                 *(["-p", parent] if parent else []), env=env).strip()
+    if not commit:
+        return None
+    ref = f"refs/hallmonitor/C{n}"
+    git(root, "update-ref", ref, commit)
+    return {"ref": ref, "commit": commit, "tree": tree}
+
+
+def diff_from(root, ref):
+    """What changed in the working tree since a checkpoint (tracked files)."""
+    return git(root, "diff", ref)
 
 
 def changes(root, base):

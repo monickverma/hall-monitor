@@ -68,6 +68,16 @@ def tool_output(p):
     return text_of(first(p, "tool_response", "tool_output", "output", "result", default=""))
 
 
+def exit_code(p):
+    """The command's exit code, if Bob's PostToolUse payload carries one (unverified; the probe checks)."""
+    for src in (p, first(p, "tool_response", "tool_output", "output", "result", default={})):
+        if isinstance(src, dict):
+            v = first(src, "exit_code", "exitCode", "returncode", "return_code")
+            if isinstance(v, int) or (isinstance(v, str) and v.lstrip("-").isdigit()):
+                return int(v)
+    return None
+
+
 def subagent_brief(inp):
     """(brief, preset) from a spawn_subagent input; field names are unverified, so accept several."""
     brief = text_of(first(inp, "task", "prompt", "instructions", "description", "message", "query",
