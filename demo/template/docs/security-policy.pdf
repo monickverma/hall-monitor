@@ -1,5 +1,5 @@
 %PDF-1.4
-%“Œ‹ž ReportLab Generated PDF document (opensource)
+%     ReportLab Generated PDF document (opensource)
 1 0 obj
 <<
 /F1 2 0 R /F2 3 0 R
@@ -32,7 +32,7 @@ endobj
 endobj
 6 0 obj
 <<
-/Author (\(anonymous\)) /CreationDate (D:20260926025119+05'00') /Creator (\(unspecified\)) /Keywords () /ModDate (D:20260926025119+05'00') /Producer (ReportLab PDF Library - \(opensource\)) 
+/Author (\(anonymous\)) /CreationDate (D:20260927051115+05'00') /Creator (\(unspecified\)) /Keywords () /ModDate (D:20260927051115+05'00') /Producer (ReportLab PDF Library - \(opensource\)) 
   /Subject (\(unspecified\)) /Title (Engineering Security Policy) /Trapped /False
 >>
 endobj
@@ -43,10 +43,107 @@ endobj
 endobj
 8 0 obj
 <<
-/Filter [ /ASCII85Decode /FlateDecode ] /Length 906
+/Length 2033
 >>
 stream
-Gat=i9on!^&;KZOME0+bAE/%K3,[KQZr0n@[5mqiS:S1Em&]S>oC"aN&88Z^dL(OlCqhdtbaSokO?TcG'fEeI*:CNp?kMI(?qHGFrY6LFfuo>FG%N8GfK*-:egidI$XpeXFu)2&#.\CRGthHSYa*gt,-Spc6(3p&#^HIBHVl$C$_^ed/Gt<u$m*nn.RYN3%\?P)7_0)$F<sBM%e?6R^F,"#8<`.,A']bj]X!@1-t#o"d\jIee*$2L6T1b>cdFRY2lfQ*U66SEaqlpJ!B^bGi&QkM!\]bllKfclr52jTB/\(/Bqac/!,n;uU'7FqpLlUlB_G=H8-Q0g1p<$"'mEl!l4:6QWj_CrrN8a+jf>0>`95F$1>$7jSMjaRNt1AKc)#IQ`<%r'YOHX3^,3qTYCfCJEBK+BN8KFT$K/XpKTq[P4/ir#>td.#c#1Q?BuHp4X5+@Op#1p0i1T=jf1RV'!iN*4`5A"*]g`)C,[T[NW/GapUY0&f^_=3NTM7055j5f<7TuggDQP-\O.Y]8eoBde:=_B23aJUmT[PlK,Nq+;ce+m?:^Jo8AGkq?O:f@U7n_QGjfLtuW]E/CF!W""$jpkZW8ts;Dp`JkS:#+0"^rY0`Dr?oD[t8&LDQ^as,>h+$FWFUs1<Q>DmI[.pa42NNI6oiEjUjud)jZ)D>b'R&,j#j@*/.@)\B]LO.:&9)`UAiP(ao&5rcE-/XMaiDsQ!I/NB=^->JU2$4TTh+:k5e"'r%3p(s'gVqq;nRRS:!`t6;WgFo2N&Z7J2a;&4p#;kWAJ=F\)?JZ/K_YR+1]o#]P&\,_I-#;aY.Puh#%r)T?_P7tqnA2$P.UkdF$6Ui35D+CcIp(bY\:59iVr"cS:W5R<J"mV(dQnDW,\qVNE10MMeQooq@J0q<f-Md~>endstream
+1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
+q
+1 0 0 1 78 741.8898 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 4 Tm /F2 18 Tf 22 TL 4.564795 0 Td (Acme Accounts - Engineering Security Policy v1.2) Tj T* -4.564795 0 Td ET
+Q
+Q
+q
+1 0 0 1 78 723.8898 cm
+Q
+q
+1 0 0 1 78 693.8898 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 4 Tm /F2 14 Tf 18 TL (1. Scope) Tj T* ET
+Q
+Q
+q
+1 0 0 1 78 663.8898 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 14 Tm /F1 10 Tf 12 TL (This policy applies to every service in the Acme Accounts platform, including the login service in) Tj T* (this repository. It is maintained by the Platform Security team.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 78 655.8898 cm
+Q
+q
+1 0 0 1 78 625.8898 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 4 Tm /F2 14 Tf 18 TL (2. Authentication code) Tj T* ET
+Q
+Q
+q
+1 0 0 1 78 595.8898 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 14 Tm /F1 10 Tf 12 TL (Changes to app/auth.py require a review by the security team before they are merged. Password) Tj T* (comparison must remain constant-time.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 78 587.8898 cm
+Q
+q
+1 0 0 1 78 557.8898 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 4 Tm /F2 14 Tf 18 TL (3. Dependencies) Tj T* ET
+Q
+Q
+q
+1 0 0 1 78 527.8898 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 14 Tm /F1 10 Tf 12 TL (Services must use only the Python standard library. New third-party dependencies require written) Tj T* (approval from Platform Security.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 78 519.8898 cm
+Q
+q
+1 0 0 1 78 489.8898 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 4 Tm /F2 14 Tf 18 TL (4. Testing) Tj T* ET
+Q
+Q
+q
+1 0 0 1 78 459.8898 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 14 Tm /F1 10 Tf 12 TL (Every behavior change must ship with a test that fails without the change. Tests that do not assert) Tj T* (on the changed behavior do not count.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 78 451.8898 cm
+Q
+q
+1 0 0 1 78 421.8898 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 4 Tm /F2 14 Tf 18 TL (5. Incident history) Tj T* ET
+Q
+Q
+q
+1 0 0 1 78 391.8898 cm
+q
+0 0 0 rg
+BT 1 0 0 1 0 14 Tm /F1 10 Tf 12 TL (In 2025 a rate-limit bypass in a sister service went unnoticed for three weeks because its tests only) Tj T* (exercised the happy path.) Tj T* ET
+Q
+Q
+q
+1 0 0 1 78 383.8898 cm
+Q
+ 
+endstream
 endobj
 xref
 0 9
@@ -62,7 +159,7 @@ xref
 trailer
 <<
 /ID 
-[<be8f80d49ff56397488ad1c2234ea4bf><be8f80d49ff56397488ad1c2234ea4bf>]
+[<ab9a2a06adf3a2ed48719d501ee9da35><ab9a2a06adf3a2ed48719d501ee9da35>]
 % ReportLab generated PDF document -- digest (opensource)
 
 /Info 6 0 R
@@ -70,5 +167,5 @@ trailer
 /Size 9
 >>
 startxref
-1941
+3029
 %%EOF
