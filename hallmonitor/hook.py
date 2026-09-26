@@ -11,8 +11,18 @@ import sys
 import traceback
 from pathlib import Path
 
-from . import brief, payload as P, receipts, step
+from . import brief, jev, payload as P, receipts, step
 from .store import Store
+
+# When Jev refuses a request (HTTP 403), every hook falls back here instead of the generic error path,
+# so a refusal is never silently waved through by fail_open.
+REFUSED = {
+    "PreToolUse": (2, "", "Hall Monitor couldn't check this action; ask the user."),
+    "UserPromptSubmit": (0, "[Hall Monitor] Couldn't check this prompt, so no decisions were recorded from it. "
+                            "If it states a rule, ask the user to confirm it and record it with record_decision.", ""),
+    "SessionStart": (0, "[Hall Monitor] Couldn't read the rules in AGENTS.md at session start. Ask the user "
+                        "which rules apply, and record them with record_decision.", ""),
+}
 
 HANDLERS = {
     "SessionStart": brief.session_start,
@@ -34,7 +44,16 @@ def handle(payload):
     if handler is None:
         return 0, "", ""
     try:
-        code, out, err = handler(payload, store)
+        try:
+            code, out, err = handler(payload, store)
+        except jev.JevRefused:
+            store.log({"stage": "error", "event": P.event(payload), "fallback": "jev_refused",
+                       "error": "Jev refused the request"})
+            if P.event(payload) == "Stop":
+                store.queue_note("Hall Monitor couldn't check the final claims. Ask the user to review them.")
+                from . import report
+                report.write_hall_pass(store)
+            code, out, err = REFUSED.get(P.event(payload), (0, "", ""))
         if code == 2 and err:
             path, command, _ = P.describe(P.tool(payload), P.tool_input(payload))
             target = path or command or P.tool(payload)

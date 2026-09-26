@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 from . import evidence, jev, payload as P, policy, questions as Q
-from .store import PROTECTED
+from .store import is_protected
 
 
 def _read(root, path, limit=3000):
@@ -180,7 +180,7 @@ def pre_tool(p, store):
 
     if tool in P.SPAWN_TOOLS:
         return spawn_check(p, store)
-    if rel and tool in P.EDIT_TOOLS and re.sub(r"^\./", "", rel).lower().startswith(PROTECTED):
+    if rel and tool in P.EDIT_TOOLS and is_protected(store.root, rel, base=P.first(p, "cwd")):
         store.log({"stage": "step", "tool": tool, "target": rel, "action": "block",
                    "note": "protected: Hall Monitor's own configuration and records"})
         return 2, "", ("Hall Monitor: .bob/ and .hallmonitor/ hold Hall Monitor's own configuration and records, "
@@ -216,11 +216,14 @@ def pre_tool(p, store):
         d, det = judge(store, action, reason=None if exact else reason, check_match=intent is not None and not exact,
                        agent=intent["agent"] if intent else "main",
                        agent_task=intent.get("agent_task") if intent else None)
-    except jev.JevRefused:  # decided by code alone: only work an approved intent already covers goes ahead
-        covered = intent is not None and intent["verdict"] in ("approved", "approved_with_note")
-        store.log({"stage": "step", "tool": tool, "target": rel or command, "action": "allow" if covered else "block",
+    except jev.JevRefused:
+        # Decided by code alone. Only a command that is exactly one an approved intent declared goes ahead:
+        # that exact command was already judged (destructive? breaks a rule?) when the intent was approved.
+        # An edit's content was never judged, so it waits for the user.
+        judged = exact and intent["verdict"] in ("approved", "approved_with_note")
+        store.log({"stage": "step", "tool": tool, "target": rel or command, "action": "allow" if judged else "block",
                    "fallback": "jev_refused", "note": "Jev couldn't check this; decided by code"})
-        return (0, "", "") if covered else (2, "", "Hall Monitor couldn't check this action; ask the user.")
+        return (0, "", "") if judged else (2, "", "Hall Monitor couldn't check this action; ask the user.")
     sess = store.session()
     sess["actions"].append({"tool": tool, "target": rel or command, "decision": d.action})
     store.save_session(sess)

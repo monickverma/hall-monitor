@@ -145,20 +145,39 @@ def _receipt_view(r):
     return v
 
 
+def kind_by_code(text):
+    """A claim's kind from its wording, used when Jev can't classify it (a refused request)."""
+    for kind, pattern in KIND_RULES:
+        if re.search(pattern, text, re.I):
+            return kind
+    return "other_claim"
+
+
+KIND_RULES = [
+    ("unchanged", r"\b(not|never)\b.{0,40}\b(modif|chang|touch|edit)|\b(unchanged|untouched|left alone)\b"),
+    ("tests_pass", r"\b(all )?tests? (now )?pass|\bsuite passes\b"),
+    ("tests_added", r"\b(added|wrote|new)\b.{0,40}\btests?\b|\btests? (that )?(verify|check|cover)"),
+    ("fixed", r"\bfix(ed|es)?\b"),
+    ("implemented", r"\b(implement|add|wire|creat|introduc|wrote|built)\w*"),
+]
+
+
 def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
     t0 = time.time()
     cfg, sess = store.config(), store.session()
-    audit_notes = {int(k): v for k, v in (audit_notes or {}).items()}
-    resubmit = bool(audit_notes)  # the same round, completed with an explore subagent's audit
     parsed = parse(claims_or_summary)
     tok = 0
     claims = []
     if parsed:
-        kinds, usage = jev.ask({"sentences": [t for t, _ in parsed]},
-                               {f"kind_{i}": Q.claim_kind(i) for i in range(len(parsed))})
-        tok += jev.tokens(usage)
+        try:  # claim kinds come from Jev; if Jev refuses, from code, so the code checks below still decide
+            kinds, usage = jev.ask({"sentences": [t for t, _ in parsed]},
+                                   {f"kind_{i}": Q.claim_kind(i) for i in range(len(parsed))})
+            tok += jev.tokens(usage)
+            kind_of = lambda i: kinds[f"kind_{i}"]["choice"]  # noqa: E731
+        except jev.JevRefused:
+            kind_of = lambda i: kind_by_code(parsed[i][0])  # noqa: E731
         for i, (text, cited) in enumerate(parsed):
-            kind = kinds[f"kind_{i}"]["choice"]
+            kind = kind_of(i)
             if kind == "not_a_claim" and isinstance(claims_or_summary, str):
                 continue
             claims.append({"claim": text, "kind": kind, "cited": cited, "from": "agent"})
@@ -166,6 +185,13 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
     claims += [{"claim": f"The finished work satisfies the project rule {d['id']}: \"{d['text']}\"",
                 "kind": "obligation", "cited": [], "from": "ledger"}
                for d in store.active_decisions(kind="obligation")]
+    # Audit notes count only for audits Hall Monitor requested in the last round, on the same claim.
+    # Anything else is ignored, so attaching notes can't be used to skip a send-back round.
+    requested = sess.get("pending_audits") or {}
+    offered = {int(k): v for k, v in (audit_notes or {}).items()}
+    audit_notes = {i: v for i, v in offered.items()
+                   if 0 <= i < len(claims) and requested.get(str(i)) == claims[i]["claim"]}
+    resubmit = bool(audit_notes)  # the same round, completed with the requested audit
 
     all_changes = gitutil.changes(store.root, sess.get("base"))
     docs = {cfg["claims_file"].lower()}
@@ -221,30 +247,37 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
     risk_jobs = [({"change": {"file": f, "status": c["status"],
                               "added": "\n".join(t for _, t in c["added"][:40])}}, {"risk": Q.FILE_RISK})
                  for f, c in changes.items()]
-    results = jev.ask_many([verdict_job(i, deep=i in audit_notes) for i in to_judge] + risk_jobs)
-    answers = {i: a for i, (a, _) in zip(to_judge, results)}
-    tok += sum(jev.tokens(u) for _, u in results)
-    decisions = {i: judge(answers[i], cfg["claim_escalate_cost"]) for i in to_judge}
-    tiers = {i: "jev+audit" if i in audit_notes else "jev" for i in to_judge}
+    results = jev.ask_many([verdict_job(i, deep=i in audit_notes) for i in to_judge] + risk_jobs,
+                           return_refusals=True)
+    ok = lambda r: not isinstance(r, jev.JevRefused)  # noqa: E731
+    answers = {i: r[0] for i, r in zip(to_judge, results) if ok(r)}
+    refused = [i for i in to_judge if i not in answers]  # these claims become "can't check"
+    tok += sum(jev.tokens(r[1]) for r in results if ok(r))
+    decisions = {i: judge(answers[i], cfg["claim_escalate_cost"]) for i in answers}
+    tiers = {i: "jev+audit" if i in audit_notes else "jev" for i in answers}
 
     # Tier 2: a deep look, with all evidence and a longer diff, only where it could change the outcome.
-    redo = [i for i in to_judge if decisions[i].escalate and i not in audit_notes]
-    for i, (a, u) in zip(redo, jev.ask_many([verdict_job(i, deep=True) for i in redo])):
-        answers[i], decisions[i], tiers[i] = a, judge(a, cfg["bob_audit_cost"]), "jev_deep"
-        tok += jev.tokens(u)
+    redo = [i for i in answers if decisions[i].escalate and i not in audit_notes]
+    for i, r in zip(redo, jev.ask_many([verdict_job(i, deep=True) for i in redo], return_refusals=True)):
+        if ok(r):  # a refused deep look keeps the focused answer
+            answers[i], decisions[i], tiers[i] = r[0], judge(r[0], cfg["bob_audit_cost"]), "jev_deep"
+            tok += jev.tokens(r[1])
 
     # Tier 3: still worth more scrutiny -> an independent Bob audit (Bob Shell if installed, else ask
     # the supervised Bob to spawn a read-only explore subagent and resubmit with its findings).
     audits = []
-    for i in to_judge:
+    for i in list(answers):
         if tiers[i] == "jev_deep" and decisions[i].escalate:
             brief_text = audit_brief(claims[i]["claim"], changed_files, tests, sab)
             notes = bob.shell_audit(store.root, brief_text)
             if notes:
                 audit_notes[i] = notes
-                a, u = jev.ask(*verdict_job(i, deep=True))
-                answers[i], decisions[i], tiers[i] = a, judge(a, None), "bob_shell_audit"
-                tok += jev.tokens(u)
+                try:
+                    a, u = jev.ask(*verdict_job(i, deep=True))
+                    answers[i], decisions[i], tiers[i] = a, judge(a, None), "bob_shell_audit"
+                    tok += jev.tokens(u)
+                except jev.JevRefused:
+                    audits.append({"index": i, "claim": claims[i]["claim"], "brief": brief_text})
             else:
                 audits.append({"index": i, "claim": claims[i]["claim"], "brief": brief_text})
 
@@ -256,6 +289,11 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
             rows.append({**base, "state": state, "code": code, "detail": detail, "verdict": state,
                          "confidence": 1.0, "tier": "code",
                          "action": "accept" if state == "verified" else "send_back"})
+            continue
+        if i in refused:
+            rows.append({**base, "state": "cant_check", "code": "jev_refused", "action": "audit", "tier": "refused",
+                         "verdict": "cant_check", "confidence": 0.0,
+                         "detail": "Hall Monitor couldn't check this claim. Ask the user to review it."})
             continue
         a, d = answers[i], decisions[i]
         if any(x["index"] == i for x in audits):
@@ -269,12 +307,12 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
                      "code": "uncited" if c.get("uncited_fallback") else None, "detail": "",
                      "verdict": a["verdict"]["choice"], "confidence": round(a["verdict"]["confidence"], 2),
                      "shows_false": round(a["false"]["noul"], 2), "tier": tiers[i]})
-    risky = [(st["change"]["file"], round(ans["risk"]["score"], 2))
-             for (st, _), (ans, _) in zip(risk_jobs, results[len(to_judge):]) if ans["risk"]["score"] >= 2.2]
+    risky = [(st["change"]["file"], round(r[0]["risk"]["score"], 2))
+             for (st, _), r in zip(risk_jobs, results[len(to_judge):]) if ok(r) and r[0]["risk"]["score"] >= 2.2]
 
     bad = [r for r in rows if r["action"] == "send_back"]
     free = bool(bad) and free_retry and all(r["code"] == "uncited" and r["tier"] == "code" for r in bad)
-    status = "needs_evidence" if free else "send_back" if bad else "audit" if audits else "accept"
+    status = "needs_evidence" if free else "send_back" if bad else "audit" if audits or refused else "accept"
 
     sess = store.session()
     if free:
@@ -292,6 +330,8 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
             sess["last_send_back"] = sig
         elif status == "accept":
             sess["last_send_back"] = None
+    # The audits requested this round; only notes for these (same index, same claim) count next time.
+    sess["pending_audits"] = {str(a["index"]): a["claim"] for a in audits}
     store.save_session(sess)
 
     cps = EV.checkpoints(store.evidence())
@@ -303,6 +343,7 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
                "verdicts": {r["claim"][:80]: r["state"] for r in rows},
                "codes": {r["claim"][:80]: r["code"] for r in rows if r["code"]},
                "tiers": [r["tier"] for r in rows], "risky_files": risky, "send_backs": sess["send_backs"],
+               "ignored_audit_notes": len(offered) - len(audit_notes) or None,
                "mutants": sab["mutants"], "survived": len(sab["survived"]),
                "tokens": tok, "ms": int((time.time() - t0) * 1000)})
     return result

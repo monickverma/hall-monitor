@@ -15,7 +15,22 @@ QHASH = hashlib.sha1(b"".join(Path(__file__).with_name(f).read_bytes()
                               for f in ("questions.py", "policy.py"))).hexdigest()[:10]
 
 # The agent must never edit its own supervisor. Checked in code, before Jev is asked.
-PROTECTED = (".bob/", ".hallmonitor/")
+PROTECTED = (".bob", ".hallmonitor")
+
+
+def is_protected(root, path, base=None):
+    """True if `path` resolves into the repo's .bob/ or .hallmonitor/. A relative path is resolved against
+    `base` (the directory Bob's tool ran in, if the payload says) or the repo root, and canonicalized, so
+    `app/../.hallmonitor/x`, `./.bob/x`, `../.hallmonitor/x` from a subfolder and absolute paths are caught."""
+    import os
+    root = Path(root).resolve()
+    p = Path(str(path))
+    target = os.path.normcase(str((p if p.is_absolute() else Path(base or root) / p).resolve()))
+    for d in PROTECTED:
+        base = os.path.normcase(str(root / d))
+        if target == base or target.startswith(base + os.sep):
+            return True
+    return False
 
 DEFAULT_CONFIG = {
     "test_command": "python -m pytest -q",
@@ -78,7 +93,7 @@ class Store:
                      "intents": [], "blocks": [], "flags": [], "off_task_streak": 0,
                      "edit_seq": 0, "edits_since_test": 0, "stalls": 0, "fail_repeats": {},
                      "failed_step": None, "regression_seen": None, "send_backs": 0,
-                     "uncited_retry_used": False, "last_send_back": None}.items():
+                     "uncited_retry_used": False, "last_send_back": None, "pending_audits": {}}.items():
             s.setdefault(k, v)
         return s
 

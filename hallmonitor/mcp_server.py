@@ -14,9 +14,6 @@ from . import evidence, jev, ledger, receipts, report, step
 from .hook import repo_root
 from .store import Store
 
-# Results Bob reads mid-task; pending notes are put in front of them.
-DELIVERS_NOTES = {"declare_intent", "explain_block", "submit_claims", "list_evidence"}
-
 S = {"type": "string"}
 TOOLS = [
     {"name": "declare_intent",
@@ -81,8 +78,14 @@ def pending(store, name):
 
 
 def call(name, args, store):
-    prefix = pending(store, name) if name in DELIVERS_NOTES else ""
-    return prefix + _call(name, args, store)
+    """Every tool result starts with the notes Bob hasn't seen yet. If Jev refuses a request, the tool
+    answers that Hall Monitor couldn't check it, instead of failing."""
+    prefix = pending(store, name)
+    try:
+        return prefix + _call(name, args, store)
+    except jev.JevRefused:
+        store.log({"stage": "error", "tool": name, "fallback": "jev_refused", "error": "Jev refused the request"})
+        return prefix + f"Hall Monitor couldn't check this ({name}). Ask the user how to proceed."
 
 
 def _call(name, args, store):
@@ -101,12 +104,7 @@ def _call(name, args, store):
             return "No unexplained blocks. If a tool was blocked, declare an intent for it with declare_intent first."
         return "\n\n".join(f"{b['tool']} on {b['target']}:\n{b['reason']}" for b in blocks)
     if name == "submit_claims":
-        try:
-            result = receipts.verify(store, args["claims"], args.get("audit_notes"))
-        except jev.JevRefused:
-            store.log({"stage": "receipts", "action": "audit", "fallback": "jev_refused"})
-            return "Hall Monitor couldn't check these claims. Ask the user to review them."
-        return receipts.message(result)
+        return receipts.message(receipts.verify(store, args["claims"], args.get("audit_notes")))
     if name == "hall_pass":
         path, summary = report.write_hall_pass(store)
         return f"{summary}\nHall Pass: {path}"

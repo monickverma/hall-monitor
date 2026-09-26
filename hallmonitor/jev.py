@@ -9,7 +9,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 from typesafe_sdk import TypeSafeClient, TypeSafePermissionDeniedError
 
-MODEL = os.environ.get("HM_JEV_MODEL", "jev-1.13.0")
+CALIBRATED_MODEL = "jev-1.13.0"  # the harm weights, thresholds, control set and eval/ results were tuned on this
+# HM_JEV_MODEL exists for re-calibrating a new model (run eval/control_set.py and eval/seeded.py with it).
+# Any other model is marked as uncalibrated on every Hall Pass until its calibration is in place.
+MODEL = os.environ.get("HM_JEV_MODEL", CALIBRATED_MODEL)
+UNCALIBRATED = MODEL != CALIBRATED_MODEL
 PRICE_PER_M_INPUT = 0.042  # $ per 1M input tokens; output tokens are free (docs.typesafe.ai/models)
 
 _client = None
@@ -44,10 +48,19 @@ def ask(state, questions, retries=3):
             time.sleep(1.5 * 2 ** attempt)
 
 
-def ask_many(jobs, workers=8):
-    """Run independent (state, questions) requests concurrently, preserving order."""
+def ask_many(jobs, workers=8, return_refusals=False):
+    """Run independent (state, questions) requests concurrently, preserving order. With
+    return_refusals, a refused request yields its JevRefused in place of a result, so one refusal
+    doesn't sink the others."""
+    def one(job):
+        try:
+            return ask(*job)
+        except JevRefused as e:
+            if return_refusals:
+                return e
+            raise
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        return list(ex.map(lambda j: ask(*j), jobs))
+        return list(ex.map(one, jobs))
 
 
 def p_levels(answer, levels):

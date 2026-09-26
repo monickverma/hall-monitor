@@ -40,7 +40,13 @@ def cp_upper(k, n, confidence=CONFIDENCE):
 
 def certify_threshold(rows, alpha=ALPHA):
     """Step the auto-accept threshold down from 0.99. Stop at the first threshold whose bound exceeds
-    alpha; the certified threshold is the last one that passed. Returns (threshold, n, k, bound) or None."""
+    alpha; the certified threshold is the last one that passed. Returns (threshold, n, k, bound) or None.
+
+    Stopping at the first failure is deliberate: this is fixed-sequence testing (as in Trust or Escalate,
+    arXiv 2407.18370). Testing thresholds in a fixed order and stopping at the first failure keeps the
+    90% guarantee valid without a multiple-comparisons correction. Scanning every threshold and keeping
+    the lowest one that happens to pass would pick the best of many tests after seeing the data, and the
+    stated guarantee would no longer hold."""
     passed = None
     for step in range(99, 49, -1):
         t = step / 100

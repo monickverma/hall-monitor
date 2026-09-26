@@ -181,7 +181,8 @@ def write_hall_pass(store):
     rec = ""
     if receipts:
         judged_by = {"jev": "Jev", "jev_deep": "Jev deep look", "jev+audit": "Jev + explore-subagent audit",
-                     "bob_shell_audit": "Jev + Bob Shell auditor", "code": "code (no Jev needed)"}
+                     "bob_shell_audit": "Jev + Bob Shell auditor", "code": "code (no Jev needed)",
+                     "refused": "nobody: Jev refused the request"}
         for r in sorted(receipts["rows"], key=lambda r: STATE_ORDER.get(r.get("state"), 9)):
             bits = [f"judged by {judged_by.get(r['tier'], r['tier'])}"]
             if r.get("cited"):
@@ -204,6 +205,10 @@ def write_hall_pass(store):
     tiles = [(len(judged), "actions & intents judged"), (len(stopped), "stopped before they ran"),
              (len(patterns), "rationalizations named"), (rounds, "receipt rounds"),
              (f"${jev.cost(tok):.4f}", f"Jev cost ({tok:,} input tokens, {jev.MODEL})")]
+
+    uncal = (f'<div class="why"><span class="pattern">Uncalibrated model:</span> this session ran {e(jev.MODEL)}, but '
+             f'the thresholds were tuned on {e(jev.CALIBRATED_MODEL)}. Run eval/control_set.py and eval/seeded.py '
+             'with it before trusting these verdicts.</div>') if jev.UNCALIBRATED else ""
 
     # Each feedback loop's work this session.
     loops = [
@@ -251,7 +256,8 @@ def write_hall_pass(store):
                 o = s["over_reliance"][key]
                 lines.append(f'reviewers {label} accepted {o["rate"]:.0%} of false claims ({o["reviewers"]} reviewers)')
         note = (f'{s["claims"]} claims we seeded ourselves across {s["variants"]} variants, model {s["model"]}'
-                + (f'; {s["label_corrections"]} label corrected after scoring, disclosed' if s["label_corrections"] else ""))
+                + (f'; {s["label_corrections"]} label corrected after scoring, disclosed' if s["label_corrections"] else "")
+                + (f'; this session ran {jev.MODEL}, so these numbers don\'t apply to it' if s["model"] != jev.MODEL else ""))
         seeded_html = (f'<h2>Receipts checked against seeded errors</h2><section><table>' +
                        "".join(f'<tr><td class="why">{e(l)}</td></tr>' for l in lines) +
                        f'<tr><td class="stage">{e(note)}</td></tr></table></section>')
@@ -259,7 +265,7 @@ def write_hall_pass(store):
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Hall Pass</title><style>{CSS}</style></head>
 <body><main>
 <div class="pass"><div><div class="kicker">HALL MONITOR · HALL PASS</div><h1>Supervised Bob session</h1>
-<div class="goal">{e(sess.get('goal') or 'No goal recorded')}</div></div>
+<div class="goal">{e(sess.get('goal') or 'No goal recorded')}</div>{uncal}</div>
 <div class="stamp {stamp[0]}" style="color:var(--{stamp[0]})">{stamp[1]}<small>RECEIPTS</small></div></div>
 <div class="tiles">{''.join(f'<div class="tile"><b>{e(v)}</b><span>{e(k)}</span></div>' for v, k in tiles)}</div>
 <h2>Escalation ladder</h2><div class="ladder">
