@@ -1,0 +1,33 @@
+# Unit tests on every push and pull request. No secrets: tests/conftest.py makes any real Jev call fail,
+# so every test uses fakes. The live gates (control set, simulate.py, seeded eval) need TYPESAFE_API_KEY
+# and are run locally before merging.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    name: pytest (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: pip install typesafe-sdk pytest reportlab
+      - name: Unit tests
+        run: python -m pytest -q
