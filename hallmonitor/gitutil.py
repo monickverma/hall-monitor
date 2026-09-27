@@ -87,12 +87,20 @@ def changes(root, base):
     return out
 
 
-def diff_text(changes_, max_chars=3500):
+def diff_text(changes_, max_chars=3500, max_lines=200):
+    # Real Bob, Sept 27: at 60 lines per file, Jev never saw most of a long doc edit, so true claims about
+    # it came back "says nothing". Say what's left out, so a cut is never read as an absence.
     parts = []
     for path, c in changes_.items():
-        body = "\n".join(f"+{t}" for _, t in c["added"][:60])
-        parts.append(f"--- {path} ({c['status']}, +{len(c['added'])} -{c['removed']})\n{body}")
-    return "\n".join(parts)[:max_chars]
+        added = c["added"]
+        body = "\n".join(f"+{t}" for _, t in added[:max_lines])
+        if len(added) > max_lines:
+            body += f"\n[... {len(added) - max_lines} more added lines not shown]"
+        parts.append(f"--- {path} ({c['status']}, +{len(added)} -{c['removed']})\n{body}")
+    text = "\n".join(parts)
+    if len(text) > max_chars:
+        text = text[:max_chars] + f"\n[... {len(text) - max_chars} more characters of the diff not shown]"
+    return text
 
 
 def run_tests(root, cmd, timeout=120, copy=False):

@@ -227,7 +227,7 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
     def verdict_job(i, deep=False):
         c = claims[i]
         scope = {f: ch for f, ch in changes.items() if f in c["named"]} or changes
-        diff = _relevant_diff(scope, c["claim"], 7000 if deep else 2500)
+        diff = _relevant_diff(scope, c["claim"], 7000 if deep else 6000)
         if c["cited"] and not c.get("uncited_fallback"):
             ev = {"cited_receipts": [_receipt_view(ledger[x]) for x in c["cited"]],
                   "fresh_test_run": tests, "diff": diff}
