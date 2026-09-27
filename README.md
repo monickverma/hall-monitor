@@ -34,7 +34,7 @@ Then:
 
 This installs, under `.bob/`: hooks (`settings.json`), the MCP server (`mcp.json`), two custom modes, four skills, five slash commands, and Plan-mode rules.
 
-**CI / headless:** `python scripts/headless.py <repo> "<task>"` runs Bob Shell (`bob run --mode supervised --format json`) and exits non-zero unless Receipts verified the work. Under `bob run` every tool is pre-approved, so Hall Monitor is the only gate. `TYPESAFE_API_KEY` must be in the environment. Never commit it.
+**CI / headless:** `python scripts/headless.py <repo> "<task>"` runs Bob Shell (`bob run --mode supervised --format json`) and exits non-zero unless Receipts verified the work. Under `bob run` every tool is pre-approved, so Hall Monitor is the only gate. `TYPESAFE_API_KEY` and Bob Shell's `BOB_API_KEY` must be in the environment. Never commit them. On a fresh runner, `bob run` stops at IBM's license: accept it once with `bob`, or set `HM_BOB_ACCEPT_LICENSE=1` (a key of type 'general' also needs `HM_BOB_TEAM_ID`).
 
 ## Running the tests
 
