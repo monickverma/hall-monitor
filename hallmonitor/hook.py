@@ -11,7 +11,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from . import brief, jev, payload as P, receipts, step
+from . import brief, jev, lessons, payload as P, receipts, step
 from .store import Store, rel_path
 
 # When Jev refuses a request (HTTP 403), every hook falls back here instead of the generic error path,
@@ -24,12 +24,19 @@ REFUSED = {
                         "which rules apply, and record them with record_decision.", ""),
 }
 
+def stop(p, store):
+    """The backstop for unsubmitted work, then this session's lessons for the next one (lessons.py)."""
+    result = receipts.stop_hook(store, P.assistant_text(p))
+    lessons.save(store)
+    return result
+
+
 HANDLERS = {
     "SessionStart": brief.session_start,
     "UserPromptSubmit": brief.user_prompt,
     "PreToolUse": step.pre_tool,
     "PostToolUse": step.post_tool,
-    "Stop": lambda p, s: receipts.stop_hook(s, P.assistant_text(p)),
+    "Stop": stop,
 }
 
 

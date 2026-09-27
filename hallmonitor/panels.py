@@ -1,8 +1,11 @@
 """Hall Pass content added in v4.2, kept out of report.write_hall_pass, which calls extra() once.
 
 - Pseudo-tested: functions whose whole body can be replaced without failing a test (mutation.py).
+- Lessons: what this session will tell the next one at SessionStart (lessons.py).
 """
 from html import escape
+
+from . import lessons
 
 
 def _e(x):
@@ -23,7 +26,17 @@ def pseudo_tested(receipts):
             f'{sab["extreme_mutants"]} changed functions tried was caught when its body was replaced.</td></tr>')
 
 
+def lessons_html(store):
+    lines = lessons.summarize(lessons.session_events(store))
+    if not lines:
+        return ""
+    return ('<h2>For the next session</h2><section><table>' +
+            "".join(f'<tr><td class="why">{_e(line)}</td></tr>' for line in lines) +
+            '<tr><td class="stage">Hall Monitor opens the next session\'s briefing with these lines.</td></tr>'
+            '</table></section>')
+
+
 def extra(store, receipts):
     """HTML for the v4.2 panels, placed right after the Receipts section."""
     rows = pseudo_tested(receipts)
-    return f"<section><table>{rows}</table></section>" if rows else ""
+    return (f"<section><table>{rows}</table></section>" if rows else "") + lessons_html(store)
