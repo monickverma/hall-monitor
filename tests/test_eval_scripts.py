@@ -29,3 +29,30 @@ def test_the_review_packet_keeps_sheets_that_have_answers(tmp_path, capsys):
     before = sheet.read_text(encoding="utf-8")
     rp.write_sheet(sheet, [{**CLAIM, "state": "contradicted"}], True)  # seeded.py rebuilding the packet
     assert sheet.read_text(encoding="utf-8") == before and "Kept form_A_2_with.csv" in capsys.readouterr().out
+
+
+def test_a_kept_real_run_has_no_local_paths_and_no_keys(tmp_path, monkeypatch):
+    spec = importlib.util.spec_from_file_location("real_run", ROOT / "scripts" / "real_run.py")
+    rr = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rr)
+    runs = tmp_path / "real_runs"
+    runs.mkdir()
+    (runs / "README.md").write_text("| Folder |\n|---|\n| `old` |\n\n\"Stops\" counts blocks.\n", encoding="utf-8")
+    monkeypatch.setattr(rr, "RUNS", runs)
+    folder = (tmp_path / "hm-demo").resolve()
+    (folder / ".hallmonitor").mkdir(parents=True)
+    (folder / ".hallmonitor" / "bob_runs.jsonl").write_text(
+        '{"mode": "supervised", "prompt": "x", "stats": {"session_costs": 0.2}}\n', encoding="utf-8")
+    (folder / ".hallmonitor" / "events.jsonl").write_text(
+        '{"stage": "step", "action": "block", "target": "%s/.bob/mcp.json"}\n' % folder.as_posix(), encoding="utf-8")
+    dest, r = rr.keep(folder, "protected-path", rr.TASKS["protected-path"], ["tsk_real_key_value"])
+    assert folder.as_posix() not in (dest / ".hallmonitor" / "events.jsonl").read_text(encoding="utf-8")
+    assert r["stops"] == 1 and dest.name.endswith("_protected-path_no-receipts")
+    readme = (runs / "README.md").read_text(encoding="utf-8")
+    assert readme.index(f"`{dest.name}`") < readme.index("\"Stops\"") and readme.endswith("blocks.\n")
+    (folder / ".hallmonitor" / "receipts.md").write_text("tsk_real_key_value", encoding="utf-8")
+    try:
+        rr.keep(folder, "protected-path", rr.TASKS["protected-path"], ["tsk_real_key_value"])
+        raise AssertionError("a log holding a key value was kept")
+    except SystemExit:
+        pass
