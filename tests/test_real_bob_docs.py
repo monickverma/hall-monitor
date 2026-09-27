@@ -54,3 +54,25 @@ def test_a_claim_about_a_doc_is_judged_on_that_docs_diff(tmp_path, monkeypatch):
     kept = next(r for r in result["rows"] if r["claim"].startswith("First line kept"))
     assert kept["state"] != "contradicted"  # the header's README.md is where it is, not what it says changed
     assert not any(r["code"] == "diff_mismatch" for r in result["rows"])
+
+
+def test_a_rule_about_a_doc_is_checked_on_that_doc_not_on_hall_monitors_install(tmp_path, monkeypatch):
+    """Real Bob Shell run, Sept 27: Bob's README claim was verified, but "The finished work satisfies D1"
+    (D1: add a section to README.md) was judged on a diff holding only the .bob/ files Hall Monitor
+    installed after the base commit, contradicted every round, and the task ended STUCK."""
+    fake = FakeJev()
+    monkeypatch.setattr(jev, "ask", fake)
+    store = make_repo(tmp_path, {"README.md": "# Accounts service\n", "app/service.py": "x = 1\n"},
+                      config={"test_command": PASSING, "max_mutants": 0, "max_extreme_mutants": 0})
+    (store.root / ".bob").mkdir(exist_ok=True)
+    (store.root / ".bob" / "mcp.json").write_text('{"mcpServers": {}}\n', encoding="utf-8")
+    store.add_decision('Add a "Rate limiting" section to README.md.', "user", kind="obligation")
+    text = "# Accounts service\n\n## Rate limiting\n\nAt most 5 login attempts per user per minute.\n"
+    (store.root / "README.md").write_text(text, encoding="utf-8")
+    EV.record({"tool": "write_file", "input": {"path": "README.md", "content": text}}, store)
+    result = receipts.verify(store, [{"claim": "Added a Rate limiting section to README.md.", "evidence": ["E1"]}])
+    diffs = {c["state"]["claim"]: c["state"]["evidence"].get("diff", "") for c in fake.calls if "claim" in c["state"]}
+    rule = next(d for claim, d in diffs.items() if "D1" in claim)
+    assert "+## Rate limiting" in rule and ".bob/" not in rule
+    assert not any(".bob/" in d for d in diffs.values())
+    assert not any(f.startswith(".bob/") for f, _ in result["risky_files"])

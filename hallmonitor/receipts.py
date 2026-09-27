@@ -33,6 +33,7 @@ import time
 from . import fabricated as FB, mutation  # v4.2 fabricated files, extreme mutation
 
 from . import bob, brief, evidence as EV, gitutil, jev, policy, questions as Q
+from .store import is_protected
 
 # Evidence for claims judged without citations (after the free retry, and Hall Monitor's own
 # obligation claims), per claim kind (less noise, fewer tokens).
@@ -278,7 +279,10 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
                    if 0 <= i < len(claims) and requested.get(str(i)) == claims[i]["claim"]}
     resubmit = bool(audit_notes)  # the same round, completed with the requested audit
 
-    all_changes = gitutil.changes(store.root, sess.get("base"))
+    # .bob/ and .hallmonitor/ are Hall Monitor's own (installed after the base commit in a demo repo), and
+    # Bob can't write them: real Bob, Sept 27, they were the only "code" in a docs task's diff.
+    all_changes = {f: c for f, c in gitutil.changes(store.root, sess.get("base")).items()
+                   if not is_protected(store.root, f)}
     docs = {cfg["claims_file"].lower()}
     changes = {f: c for f, c in all_changes.items()
                if f.lower() not in docs and not f.lower().endswith((".md", ".txt", ".rst", ".pdf"))}
@@ -293,7 +297,9 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
         # same is about ("First line kept as ..." under a README.md header).
         said = HEADER_TAG_RE.sub("", c["claim"]) if c["kind"] == "unchanged" else c["claim"]
         c["named"] = named_files(said, known) if c["from"] == "agent" else []
-        c["where"] = named_files(c["claim"], known) if c["from"] == "agent" else []  # the diff Jev is shown
+        # The diff Jev is shown. A rule's own files count too: real Bob, Sept 27, "The finished work satisfies
+        # D1: Add a section to README.md" was judged on a diff without README.md and contradicted every round.
+        c["where"] = named_files(c["claim"], known)
         cert = None if c["from"] == "ledger" else \
             certify(c["kind"], c["cited"], c["named"], all_changes, ledger, tests,
                     FB.unknown_files(store.root, sess.get("base"), c["claim"], known))  # v4.2 fabricated files
