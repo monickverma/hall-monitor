@@ -61,7 +61,7 @@ def describe(tool_name, inp):
         detail = first(inp, "content", "diff", "new_content", "text", default="") or ""
     if command and not path:
         detail = command
-    return path, command, str(detail)[:2500]
+    return path, command, str(detail)[:20000]  # a safety cap; step.pre_tool marks what Jev doesn't see
 
 
 def tool_output(p):

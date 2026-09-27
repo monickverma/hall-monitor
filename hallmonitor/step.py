@@ -15,6 +15,8 @@ from . import evidence, jev, payload as P, policy, questions as Q
 from .store import is_protected, rel_path
 
 
+MAX_EDIT_CHARS = 6000  # about 1,500 Jev input tokens, well under a cent per thousand edits
+
 def _read(root, path, limit=3000):
     try:
         return (Path(root) / path).read_text(encoding="utf-8")[:limit]
@@ -216,7 +218,12 @@ def pre_tool(p, store):
         return 2, "", f"Hall Monitor: intent {intent['id']} was rejected, so this action is blocked:\n{intent['why']}"
 
     t0 = time.time()
-    action = {"tool": tool, "target": rel or command, "content": detail_text[:1200]}
+    # Real Bob, Sept 27: cut to 1,200 characters, an edit adding three methods showed Jev only the first one,
+    # so it judged the edit a mismatch with its intent, and the block revoked the intent. Show the whole
+    # edit up to MAX_EDIT_CHARS, and say so when some of it is left out.
+    content = detail_text if len(detail_text) <= MAX_EDIT_CHARS else (
+        detail_text[:MAX_EDIT_CHARS] + f"\n[... {len(detail_text) - MAX_EDIT_CHARS} more characters not shown]")
+    action = {"tool": tool, "target": rel or command, "content": content}
     # A command that is exactly one the approved intent declared matches it by definition: code decides
     # that, and Jev only checks the action itself (destructive? breaks a rule? on-task?).
     exact = bool(intent and command and command.strip() in {c.strip() for c in intent.get("commands", [])})

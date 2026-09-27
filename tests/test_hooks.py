@@ -57,6 +57,26 @@ def test_write_file_with_an_absolute_path_runs_under_its_declared_intent(repo, s
     assert (row["kind"], row["file"], row["tool"], row["edit_seq"]) == ("edit", "app/service.py", "write_file", 1)
 
 
+
+@SHAPES
+def test_a_long_edit_reaches_jev_whole_or_marked_as_cut(repo, shape, monkeypatch):
+    """Real Bob, Sept 27: an edit adding three methods was cut to its first 1,200 characters for the match
+    question, so Jev judged it a mismatch with its intent, and the block revoked the intent."""
+    store = Store(repo)
+    approve(store, files=["app/service.py"])
+    fake = FakeJev()
+    monkeypatch.setattr(jev, "ask", fake)
+    body = "".join(f"def helper_{i}():\n    '''Helper {i}.'''\n    return {i}\n\n" for i in range(60))
+    inp = {"path": win(repo / "app" / "service.py"), "line": 3, "content": body}
+    code, _, err = hook.handle(shape("PreToolUse", "insert_content", inp, cwd=str(repo)))
+    assert code == 0, err
+    assert len(body) > 2500 and "helper_59" in fake.calls[-1]["state"]["action"]["content"]
+    inp["content"] = body * 4
+    hook.handle(shape("PreToolUse", "insert_content", inp, cwd=str(repo)))
+    shown = fake.calls[-1]["state"]["action"]["content"]
+    assert shown.endswith("more characters not shown]") and len(shown) < 6100
+
+
 @SHAPES
 def test_search_and_replace_on_an_undeclared_file_is_blocked_and_explained(repo, shape, monkeypatch):
     monkeypatch.setattr(jev, "ask", never)
