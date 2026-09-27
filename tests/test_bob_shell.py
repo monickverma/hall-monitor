@@ -20,8 +20,11 @@ def fake_bob(monkeypatch, stdout="", stderr="", code=0):
     calls = []
     monkeypatch.delenv("HM_DISABLE_BOB_SHELL", raising=False)
     monkeypatch.setattr(bob.shutil, "which", lambda name: "/usr/bin/bob")
-    monkeypatch.setattr(bob.subprocess, "run", lambda cmd, **kw: calls.append(cmd) or
-                        subprocess.CompletedProcess(cmd, code, stdout=stdout, stderr=stderr))
+    def run(cmd, **kw):
+        assert kw.get("stdin") is subprocess.DEVNULL  # an open stdin once hung Bob Shell before it started
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, code, stdout=stdout, stderr=stderr)
+    monkeypatch.setattr(bob.subprocess, "run", run)
     return calls
 
 
@@ -58,3 +61,14 @@ def test_an_unexpanded_key_reference_counts_as_no_key(monkeypatch):
     monkeypatch.setattr(jev.os, "name", "posix")
     jev.load_key_from_user_env()
     assert "TYPESAFE_API_KEY" not in jev.os.environ
+
+
+def test_a_result_after_an_error_line_is_still_read(tmp_path, monkeypatch):
+    """Real Bob Shell 2.0.5: at the cost cap, `--format json` prints an error line, then the result."""
+    out = ('{"type":"error","severity":"error","message":"The task reached the cost limit of 0.300 (spent: 0.302)."}\n'
+           '{"type":"result","status":"success","stats":{"session_costs":0.302264,"tool_calls":11},'
+           '"last_message":"Receipts: all 1 claims verified."}\n')
+    fake_bob(monkeypatch, stdout=out)
+    data = REAL_RUN(tmp_path, "supervised", "do the task", "0.30", "15", 60)
+    assert data["status"] == "success" and data["stats"]["session_costs"] == 0.302264
+    assert "cost limit" in data["error"] and data["last_message"].startswith("Receipts")

@@ -57,3 +57,17 @@ def test_a_new_task_starts_its_own_receipts_rounds(tmp_path, monkeypatch):
     brief.user_prompt({"event": "UserPromptSubmit", "prompt": "Add a per-user login limit to app/service.py."}, store)
     s = Store(store.root).session()
     assert (s["send_backs"], s["suspect_files"], s["uncited_retry_used"]) == (0, {}, False)
+
+
+def test_an_intent_to_run_only_safe_commands_is_approved_by_code(tmp_path, monkeypatch):
+    """Real Bob, Sept 27: Jev was unsure about "run python -m pytest -q", so Bob stopped to ask the user."""
+    fake = FakeJev(on_task=0)  # Jev would have objected
+    monkeypatch.setattr(jev, "ask", fake)
+    store = repo(tmp_path)
+    msg = step.declare_intent(store, "Run the test suite", commands=["python -m pytest -q"])
+    assert "approved" in msg and not fake.calls
+    s = store.session()
+    s["failed_step"] = {"command": "python -m pytest -q", "last_line": "1 failed"}
+    store.save_session(s)
+    step.declare_intent(store, "Run the tests again", commands=["python -m pytest -q"])
+    assert fake.calls  # a pending failed step still gets the outcome check

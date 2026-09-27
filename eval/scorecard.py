@@ -66,7 +66,7 @@ def real_run(hm):
     rounds = [e for e in ev if e.get("stage") == "receipts" and e.get("source") != "stop"] or \
         [e for e in ev if e.get("stage") == "receipts"]
     judged = [e for e in ev if e.get("stage") in ("intent", "step", "plan", "spawn")]  # as report.py counts them
-    stops = [e for e in judged if e.get("action") in ("block", "ask_human")]
+    stops = [e for e in judged if e.get("action") in ("block", "ask_human", "restate")]
     allowed = {e.get("target") for e in ev if e.get("stage") == "step" and e.get("action") == "allow"}
     stats = runs[-1].get("stats") or {}
     return {"name": hm.parent.name, "final": rounds[-1]["action"] if rounds else "none",

@@ -26,16 +26,37 @@ def _run(root, mode, prompt, max_cost, max_turns, timeout):
         cmd += ["--team-id", os.environ["HM_BOB_TEAM_ID"]]
     cmd.append(prompt)
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+        # stdin closed: a Bob Shell run that inherited an open stdin once hung before starting (Sept 27)
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
+                           stdin=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired):
         return None
     try:
         data = json.loads(r.stdout)
     except json.JSONDecodeError:
+        data = _last_result(r.stdout)
+    if data is None:
         return {"status": "unparsed", "last_message": r.stdout[-3000:], "stats": {}, "exit_code": r.returncode,
                 "error": (r.stderr or "").strip()[-1000:]}
     data["exit_code"] = r.returncode
     return data
+
+
+def _last_result(stdout):
+    """Real Bob Shell 2.0.5, Sept 27: when a task reaches its cost cap, `--format json` prints an error object
+    on one line and the result on the next, so the output isn't one JSON value. Take the last result line and
+    keep the lines before it as `error`."""
+    rows = []
+    for line in (stdout or "").splitlines():
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    results = [x for x in rows if isinstance(x, dict) and x.get("type") == "result"]
+    if not results:
+        return None
+    notes = [str(x.get("message")) for x in rows if isinstance(x, dict) and x.get("type") == "error"]
+    return {**results[-1], **({"error": " | ".join(notes)} if notes else {})}
 
 
 def _record(root, mode, prompt, data):
