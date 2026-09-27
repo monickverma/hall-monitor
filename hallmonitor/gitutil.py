@@ -87,9 +87,10 @@ def changes(root, base):
     return out
 
 
-def diff_text(changes_, max_chars=3500, max_lines=200):
-    # Real Bob, Sept 27: at 60 lines per file, Jev never saw most of a long doc edit, so true claims about
-    # it came back "says nothing". Say what's left out, so a cut is never read as an absence.
+def diff_text(changes_, max_chars=3500, max_lines=60):
+    # Real Bob, Sept 27: Jev never saw most of a long doc edit, so true claims about it came back "says
+    # nothing". Say what's left out, so a cut is never read as an absence. (A 200-line cap with a 6,000-char
+    # Receipts budget raised seeded false alarms to 5/38, so the caps stay where they were.)
     parts = []
     for path, c in changes_.items():
         added = c["added"]

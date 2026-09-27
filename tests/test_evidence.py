@@ -220,11 +220,11 @@ def test_review_pilot_scores_each_condition(tmp_path):
 
 
 def test_diff_text_says_what_it_leaves_out():
-    """Real Bob, Sept 27: at 60 lines per file, Jev never saw most of a long doc edit."""
+    """Real Bob, Sept 27: at 60 lines per file, Jev never saw most of a long doc edit, and nothing said so."""
     from hallmonitor import gitutil
     changes = {"README.md": {"status": "modified", "added": [(i, f"line {i}") for i in range(250)], "removed": 3}}
     text = gitutil.diff_text(changes, max_chars=100000)
-    assert "+line 199\n" in text and "+line 200\n" not in text and "[... 50 more added lines not shown]" in text
+    assert "+line 59\n" in text and "+line 60\n" not in text and "[... 190 more added lines not shown]" in text
     assert gitutil.diff_text(changes, max_chars=500).endswith("more characters of the diff not shown]")
 
 
