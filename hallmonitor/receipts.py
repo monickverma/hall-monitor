@@ -30,6 +30,7 @@ count), and the Stop hook as a backstop.
 import json
 import re
 import time
+from . import fabricated as FB, mutation  # v4.2 fabricated files, extreme mutation
 
 from . import bob, brief, evidence as EV, gitutil, jev, policy, questions as Q
 
@@ -78,8 +79,11 @@ def named_files(claim, known):
     return sorted(f for f in known if f.lower() in toks or f.lower().rsplit("/", 1)[-1] in toks)
 
 
-def certify(kind, cited, named, changed, ledger, fresh):
-    """The certificate check, in code. Returns None (go on to Jev) or (state, reason_code, detail)."""
+def certify(kind, cited, named, changed, ledger, fresh, unknown=()):
+    """The certificate check, in code. Returns None (go on to Jev) or (state, reason_code, detail).
+    `unknown`: code files the claim names that exist nowhere in the repo (fabricated.unknown_files)."""
+    if unknown and kind in CHANGE_KINDS:  # v4.2: a claim about a file that doesn't exist is false, however cited
+        return "contradicted", "unknown_file", FB.message(unknown)
     # What the claim itself says about files is decided first: a claim that files changed when none of
     # them did (or that a file wasn't touched when it was) is contradicted however it is cited.
     if named:
@@ -206,7 +210,8 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
     for c in claims:
         c["named"] = named_files(c["claim"], known) if c["from"] == "agent" else []
         cert = None if c["from"] == "ledger" else \
-            certify(c["kind"], c["cited"], c["named"], all_changes, ledger, tests)
+            certify(c["kind"], c["cited"], c["named"], all_changes, ledger, tests,
+                    FB.unknown_files(store.root, sess.get("base"), c["claim"], known))  # v4.2 fabricated files
         if cert and cert[1] == "uncited" and not free_retry:
             cert, c["uncited_fallback"] = None, True  # after the free retry: judged the old way, marked uncited
         c["cert"] = cert
@@ -216,6 +221,8 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
     sab = gitutil.sabotage(store.root, changes, cfg["test_command"], cfg["max_mutants"]) if needs_sabotage \
         else {"mutants": 0, "killed": 0, "survived": [], "note": "not run"}
     changed_files = {f: c["status"] for f, c in changes.items()}
+    if needs_sabotage:  # v4.2 extreme mutation (mutation.py): pseudo-tested functions join the sabotage evidence
+        sab = {**sab, **mutation.extreme(store.root, changes, cfg)}
 
     def verdict_job(i, deep=False):
         c = claims[i]
@@ -381,6 +388,7 @@ def message(result):
         if result["risky_files"]:
             out.append("Riskiest changed files, worth the user's own look: " +
                        ", ".join(f for f, _ in result["risky_files"]))
+        out += [f"Also worth the user's look: {x}" for x in mutation.lines(sab)]  # v4.2 extreme mutation
         return "\n".join(out)
     out = [{"send_back": "Receipts: some claims are not backed by the evidence.",
             "needs_evidence": "Receipts: some claims don't cite their receipts yet. "
@@ -397,6 +405,7 @@ def message(result):
                 out.append(f"  {r['detail']}")
     for m in sab["survived"]:
         out.append(f"  evidence: tests still pass when {m['file']}:{m['line']} `{m['from']}` is changed to `{m['to']}`")
+    out += [f"  evidence: {x}" for x in mutation.lines(sab)]  # v4.2 extreme mutation
     if not result["tests"]["passed"]:
         out.append("  evidence: the fresh test run fails: " + " | ".join(result["tests"]["tail"][-2:]))
     if status == "send_back":
@@ -442,6 +451,7 @@ def report(result):
     out += ["", f"Fresh test run: {'pass' if t['passed'] else 'FAIL'} (`{t['command']}`)",
             f"Sabotage: {s['killed']}/{s['mutants']} mutants killed"]
     out += [f"- survived: {m['file']}:{m['line']} `{m['from']}` -> `{m['to']}`" for m in s["survived"]]
+    out += [f"- {x}" for x in mutation.lines(s)]  # v4.2 extreme mutation
     if result.get("checkpoint"):
         cp = result["checkpoint"]
         out += ["", f"Last checkpoint: {cp['checkpoint']} (`{cp['ref']}`, from {cp['from']})"]

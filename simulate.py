@@ -1,6 +1,8 @@
 """Replay a scripted Bob session through the real hooks and the real MCP server (real Jev calls).
 
-Usage: python simulate.py [--out demo/run]
+Usage: python simulate.py [--out demo/run] [--deep-review]
+
+--deep-review turns on deep review (hallmonitor/review.py), which is off by default and in the demo.
 
 MCP calls go through an actual stdio JSON-RPC session with hm_mcp.py, exactly as Bob would make them.
 """
@@ -79,14 +81,15 @@ class MCP:
         self.p.wait(timeout=10)
 
 
-def setup(dest):
+def setup(dest, deep_review=False):
     if dest.exists():
         shutil.rmtree(dest, onerror=lambda f, p, e: (Path(p).chmod(0o700), f(p)))
     shutil.copytree(HERE / "demo" / "template", dest)
     g = ["git", "-c", "user.name=demo", "-c", "user.email=demo@example.com", "-c", "core.autocrlf=false"]
     for args in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "initial"]):
         subprocess.run(g + args, cwd=dest, check=True)
-    Store(dest).dir.joinpath("config.json").write_text(json.dumps({"max_mutants": 6}))
+    config = {"max_mutants": 6, **({"deep_review": True} if deep_review else {})}
+    Store(dest).dir.joinpath("config.json").write_text(json.dumps(config))
 
 
 def apply(step, dest):
@@ -115,8 +118,10 @@ def main():
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(HERE / "demo" / "run"))
-    dest = Path(ap.parse_args().out).resolve()
-    setup(dest)
+    ap.add_argument("--deep-review", action="store_true", help="turn on deep review (off in the demo)")
+    args = ap.parse_args()
+    dest = Path(args.out).resolve()
+    setup(dest, args.deep_review)
     store = Store(dest)
     mcp = MCP(dest)
     print(f"MCP server up; tools: {', '.join(mcp.tools)}\n")
@@ -138,6 +143,11 @@ def main():
                 notes = {str(k): scenario.audit_for(rows[k]["claim"]) for k in idx}
                 text = mcp.call("submit_claims", {**s["args"], "audit_notes": notes})
                 s = {**s, "label": "  resubmitted with the subagent's audit"}
+            if s["mcp"] == "submit_claims" and "REVIEW NEEDED" in text:  # only with --deep-review
+                files = re.findall(r"^REVIEW NEEDED for (\S+):$", text, re.M)
+                print(f"{i:>2}. {'REVIEW':9} {s['label']:<46} -> Bob spawns explore subagents ({', '.join(files)})")
+                text = mcp.call("submit_claims", {**s["args"], "review_notes": {f: scenario.review_for(f) for f in files}})
+                s = {**s, "label": "  resubmitted with the subagents' reviews"}
             ev = (store.events()[n_before:] or [{}])[-1]
             action = ev.get("verdict") or ev.get("action") or "ok"
             code = 0

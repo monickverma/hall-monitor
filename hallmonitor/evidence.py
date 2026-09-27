@@ -73,15 +73,46 @@ def stall(store, sess, pattern, detail):
     store.log({"stage": "stall", "action": "flag", "pattern": pattern, "target": detail, "stalls": sess["stalls"]})
 
 
+CYCLE_WINDOW = 6
+
+
+def repeating_unit(keys, window=CYCLE_WINDOW):
+    """The 2- or 3-step sequence the last `window` steps repeat, or None. A 1-step repeat is left to
+    "looping on one failure" and "editing without testing"."""
+    last = keys[-window:]
+    if len(last) < window:
+        return None
+    for n in (2, 3):
+        unit = last[-n:]
+        if window % n == 0 and len(set(unit)) > 1 and last == unit * (window // n):
+            return unit
+    return None
+
+
+def _circling(store, sess, key, label):
+    """v4.2 cycle-rate signal: the same edits (same content) and commands (same outcome) in a loop.
+    An edit-test cycle that makes progress changes the edit content or the test outcome, so it never
+    repeats exactly."""
+    steps = (sess.get("cycle") or []) + [[key, label]]
+    unit = repeating_unit([k for k, _ in steps])
+    if unit:
+        names = [lbl for k, lbl in steps[-len(unit):]]
+        stall(store, sess, "going in circles",
+              f"the last {CYCLE_WINDOW} steps repeat the same {len(unit)} steps ({' -> '.join(names)})")
+        steps = []
+    sess["cycle"] = steps[-2 * CYCLE_WINDOW:]
+
+
 def record(p, store):
     """PostToolUse on an edit or a command: append a receipt and update the evidence signals."""
     cfg, sess = store.config(), store.session()
     tool = P.tool(p)
-    path, command, _ = P.describe(tool, P.tool_input(p))
+    path, command, detail = P.describe(tool, P.tool_input(p))
     if tool in P.EDIT_TOOLS and path:
         rel = rel_path(store.root, path, base=P.first(p, "cwd"))
         sess["edit_seq"] += 1
         store.add_evidence({"kind": "edit", "file": rel, "tool": tool, "edit_seq": sess["edit_seq"]})
+        _circling(store, sess, f"edit {rel} {hashlib.sha1(detail.encode('utf-8')).hexdigest()[:10]}", f"edit {rel}")
         if is_code(rel):
             sess["edits_since_test"] += 1
             if sess["edits_since_test"] == cfg["max_edits_without_test"]:
@@ -101,6 +132,7 @@ def record(p, store):
     if kind == "test":
         sess["edits_since_test"] = 0
     line = last_line(out)
+    _circling(store, sess, f"run {command.strip()} {status} {line}", f"`{command.strip()[:60]}`")
     rows = store.evidence()
     cps = checkpoints(rows)
 

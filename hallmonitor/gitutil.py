@@ -1,7 +1,9 @@
 """Evidence collection: what changed, a fresh test run, sabotage probes, and checkpoints."""
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -93,14 +95,42 @@ def diff_text(changes_, max_chars=3500):
     return "\n".join(parts)[:max_chars]
 
 
-def run_tests(root, cmd, timeout=120):
+def run_tests(root, cmd, timeout=120, copy=False):
+    """Run the test command in `root`. With copy=True (`root` is a scratch copy of the repo), the copy
+    goes first on PYTHONPATH, so an editable install of the original can't answer for it, and no bytecode
+    is written, so two mutants of one file can't share a stale .pyc."""
+    env = None
+    if copy:
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1",
+               "PYTHONPATH": os.pathsep.join([str(root)] + [p for p in [os.environ.get("PYTHONPATH")] if p])}
     try:
         r = subprocess.run(cmd, cwd=root, shell=True, capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=timeout)
+                           encoding="utf-8", errors="replace", timeout=timeout, env=env)
         tail = (r.stdout + r.stderr).strip().splitlines()[-6:]
         return {"command": cmd, "passed": r.returncode == 0, "exit_code": r.returncode, "tail": tail}
     except subprocess.TimeoutExpired:
         return {"command": cmd, "passed": False, "exit_code": None, "tail": ["timed out"]}
+
+
+COPY_SKIP = {".git", ".hallmonitor", "node_modules", ".venv", "venv", "__pycache__", ".pytest_cache", ".tox"}
+
+
+def copy_tree(root, dest):
+    """Copy what `git add -A` would snapshot (tracked plus untracked, not ignored) into `dest`, for
+    mutants that must never touch the working tree."""
+    root, dest = Path(root), Path(dest)
+    files = git(root, "ls-files", "-co", "--exclude-standard").splitlines()
+    if not files:  # not a git repository: copy the tree, minus caches and Hall Monitor's own state
+        shutil.copytree(root, dest, dirs_exist_ok=True, ignore=shutil.ignore_patterns(*COPY_SKIP, "*.pyc"))
+        return
+    for f in files:
+        src = root / f
+        if src.is_file() and not f.endswith(".pyc") and not COPY_SKIP & set(Path(f).parts):
+            (dest / f).parent.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.copy2(src, dest / f)
+            except OSError:  # a locked file: the copy's own test run shows whether it mattered
+                continue
 
 
 # Mutation operators applied to changed, non-test source lines.
@@ -120,32 +150,50 @@ def is_test(path):
     return name.startswith("test_") or name.endswith("_test.py") or "tests/" in path.replace("\\", "/")
 
 
-def sabotage(root, changes_, cmd, max_mutants=4):
-    """Break changed source lines one at a time and rerun the tests.
-
-    A surviving mutant (tests still pass on broken code) means the tests do not check that code.
-    """
-    results = []
+def plan_mutants(root, changes_, max_mutants=4):
+    """(path, lineno, original line, mutated line) for up to `max_mutants` changed, non-test source lines."""
+    plan = []
     for path, c in changes_.items():
         if is_test(path) or not path.endswith(".py"):
             continue
-        p = Path(root) / path
-        original = p.read_text(encoding="utf-8")
-        lines = original.splitlines(keepends=True)
+        lines = (Path(root) / path).read_text(encoding="utf-8").splitlines(keepends=True)
         for lineno, text in c["added"]:
-            if len(results) >= max_mutants:
-                break
+            if len(plan) >= max_mutants:
+                return plan
             if SKIP.match(text) or lineno < 1 or lineno > len(lines):
                 continue
             for pat, rep in MUTATORS:
                 mutated = re.sub(pat, rep, lines[lineno - 1], count=1)
                 if mutated != lines[lineno - 1]:
+                    plan.append((path, lineno, text, mutated))
                     break
-            else:
-                continue
+    return plan
+
+
+def sabotage(root, changes_, cmd, max_mutants=4):
+    """Break changed source lines one at a time and rerun the tests.
+
+    A surviving mutant (tests still pass on broken code) means the tests do not check that code.
+    The mutants run in a scratch copy of the repository, so the working tree is never touched: a
+    parallel subagent can't read a mutated file or lose an edit to the restore, the IDE never shows a
+    file flicker, and a hook killed mid-run can't leave a mutant behind. If the unmutated copy fails its
+    tests (a file the tests need is ignored by git, say), the mutants run in place, as before v4.2.
+    """
+    plan = plan_mutants(root, changes_, max_mutants)
+    if not plan:
+        return {"mutants": 0, "killed": 0, "survived": []}
+    results = []
+    with tempfile.TemporaryDirectory(prefix="hm-sabotage-", ignore_cleanup_errors=True) as tmp:
+        copy_tree(root, tmp)
+        in_copy = run_tests(tmp, cmd, timeout=60, copy=True)["passed"]
+        where = tmp if in_copy else root
+        for path, lineno, text, mutated in plan:
+            p = Path(where) / path
+            original = p.read_text(encoding="utf-8")
+            lines = original.splitlines(keepends=True)
             try:
                 p.write_text("".join(lines[:lineno - 1] + [mutated] + lines[lineno:]), encoding="utf-8")
-                killed = not run_tests(root, cmd, timeout=60)["passed"]
+                killed = not run_tests(where, cmd, timeout=60, copy=in_copy)["passed"]
             finally:
                 p.write_text(original, encoding="utf-8")
             results.append({"file": path, "line": lineno, "from": text.strip(),

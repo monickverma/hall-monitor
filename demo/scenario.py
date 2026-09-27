@@ -150,6 +150,19 @@ AUDIT_FINDINGS = {
 }
 
 
+# What a read-only explore subagent would report in a deep review (simulate.py --deep-review), by file.
+REVIEW_FINDINGS = {
+    "app/service.py": "app/service.py:9-13 login() calls _limiter.allow(user) before check_password(), returns "
+                      "'rate_limited' when refused and leaves the password check unchanged. No defects found.",
+    "app/ratelimit.py": "app/ratelimit.py:14-20 keeps hits per user in memory and drops those at least 60 seconds "
+                        "old before counting; the 6th attempt inside the window is refused. No defects found.",
+}
+
+
+def review_for(path):
+    return REVIEW_FINDINGS.get(path, f"{path}: read the change and the tests that cover it. No defects found.")
+
+
 def audit_for(claim):
     c = claim.lower()
     key = "implemented" if c.startswith("implemented") else "wired" if c.startswith("wired") else "default"

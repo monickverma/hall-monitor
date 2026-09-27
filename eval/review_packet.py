@@ -31,7 +31,18 @@ def sets(rows, per_set=8, seed=27):
     return {"A": a, "B": b}
 
 
+def has_answers(path):
+    """True if a reviewer has already filled in any accept_* cell of this sheet."""
+    if not path.exists():
+        return False
+    with open(path, encoding="utf-8") as f:
+        return any(v.strip() for row in csv.DictReader(f) for k, v in row.items() if k and k.startswith("accept_") and v)
+
+
 def write_sheet(path, claims, with_hm):
+    if has_answers(path):  # never overwrite answers people have entered (seeded.py rebuilds the packet)
+        print(f"Kept {path.name}: it already has reviewers' answers.")
+        return
     reviewers = [r for r, f in REVIEWERS.items()]
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)

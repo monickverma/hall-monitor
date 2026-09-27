@@ -6,6 +6,7 @@ import html
 import json
 from collections import Counter
 from pathlib import Path
+from . import panels  # v4.2 Hall Pass content
 
 from . import jev
 
@@ -111,7 +112,7 @@ def write_hall_pass(store):
     tok = sum(x.get("tokens", 0) for x in events)
     judged = [x for x in events if x.get("stage") in ("intent", "step", "plan", "spawn")]
     stopped = [x for x in judged if x.get("action") in ("block", "ask_human")]
-    patterns = [x["pattern"] for x in events if x.get("pattern")]
+    patterns = [x["pattern"] for x in events if x.get("pattern") and x.get("stage") != "stall"]  # stalls aren't excuses
     agents = {x.get("agent") for x in events if x.get("agent") and x.get("agent") != "main"}
     last_r = [x for x in events if x.get("stage") == "receipts"]
     rounds = len(last_r)
@@ -281,6 +282,7 @@ def write_hall_pass(store):
 <h2>Timeline</h2><section><table>{''.join(rows)}</table></section>
 <h2>Decision ledger</h2><section><table>{''.join(ledger_rows) or '<tr><td>none</td></tr>'}</table></section>
 <h2>Receipts</h2><section><table>{rec or '<tr><td>No claims submitted yet</td></tr>'}</table></section>
+{panels.extra(store, receipts)}
 {stuck_html}
 <h2>Loops</h2><div class="feats">{loops_html}</div>
 {forms_html}
