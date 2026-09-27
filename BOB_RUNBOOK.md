@@ -124,27 +124,31 @@ Open the `hall-monitor` folder in Bob as a trusted workspace, pick **🛂 Superv
 >   Keep the "(probe)" caveats until the probe has settled them.
 > - No personal information, and no claim the code or data don't support.
 
-**Task C: the two statements.** Paste:
-> Write docs/statements.md with the two submission statements, each under 500 words.
-> 1. **Problem & Solution.** The first line is exactly: "Hall Monitor improves one developer workflow: code review of AI-written changes."
->    - Use these numbers exactly: "Of 23,247 agent-written pull requests, 1.7% had descriptions that didn't match the code. The most common mismatch (45.4%) claimed changes that were never made, and those PRs were accepted 28.3% of the time, against 80.0% for the rest (MSR 2026)."
->    - Then: the solution, who uses it, how they use it, and what's new.
->    - Any other number comes only from `eval/summary.json` or the real Bob run in `demo/bob_run/`, each with its n.
-> 2. **IBM Bob Usage.** Which Bob features Hall Monitor runs on (from ARCHITECTURE.md), and which parts of this repo Bob built: the tasks in BOB_RUNBOOK.md step 5, with their `bob_sessions/` screenshots.
->
-> Use plain language, and make no claim the repo doesn't support.
+**Task C: the two statements.** Hall Monitor turns every line of a prompt into a rule it enforces, so keep the prompt short and leave the spec in this file. Paste:
+> Write docs/statements.md following the Task C spec in BOB_RUNBOOK.md. Create only docs/statements.md, and don't run git commands. When you're done, call list_evidence, then submit_claims with each claim citing the receipt IDs that prove it.
+
+Task C spec:
+- Two submission statements, each under 500 words.
+- **Problem & Solution.** The first line is exactly: "Hall Monitor improves one developer workflow: code review of AI-written changes."
+  - Use these numbers exactly: "Of 23,247 agent-written pull requests, 1.7% had descriptions that didn't match the code. The most common mismatch (45.4%) claimed changes that were never made, and those PRs were accepted 28.3% of the time, against 80.0% for the rest (MSR 2026)."
+  - Then: the solution, who uses it, how they use it, and what's new.
+  - Any other number comes only from `eval/summary.json` (with its n and "on claims we seeded ourselves") or from the Hall Pass files in `bob_sessions/`.
+- **IBM Bob Usage.** Which Bob features Hall Monitor runs on (from ARCHITECTURE.md), and which parts of this repo Bob built, from the table in step 5.
+- Plain language, and no claim the repo doesn't support.
 
 ## 5. What Bob built (fill in as you go)
 
-| Task | Member | Screenshot in `bob_sessions/` | Files Bob changed |
+| Task | Member | Evidence in `bob_sessions/` | Files Bob changed |
 |---|---|---|---|
-| Probe (step 1) | | | — |
-| Demo task (step 3) | | | `demo/bob_run/` |
-| A: trust levels | | | |
-| B: docs | | | README.md, ARCHITECTURE.md |
-| C: statements | | | docs/statements.md |
+| Probe (step 1) | member1 | The probe prompts ran in Bob Shell (`bob run`). IDE screenshots of Settings → Hooks, Settings → MCP and the probe task are still to add | — |
+| Demo task (step 3) | member1 | Still to record in the Bob IDE | `demo/bob_run/` |
+| A: trust levels | member1, Bob Shell | Not built. The run stopped at its 5-Bobcoin cap after 8 blocks: Hall Monitor showed Jev only the first 1,200 characters of each edit, so Jev judged Bob's partial edits a mismatch. Supervising Bob on its own code found that bug; it's fixed in commit 0e3d6fc | — |
+| B: docs | member1, Bob Shell | `2026-09-27_taskB-docs_member1.json`, `2026-09-27_taskB-docs_member1_hall-pass.html` | README.md, ARCHITECTURE.md (review fixes in the next commit) |
+| C: statements | | Still to run in the Bob IDE, with the prompt above | docs/statements.md |
 
-Every team member runs at least one of these tasks, and saves its screenshot.
+Tasks A and B ran headless with `bob run --mode supervised`, supervised by a stable copy of Hall Monitor (`C:/hm-stable`). Two earlier attempts at task B stopped to ask the user: their prompts held lines Hall Monitor enforced as rules, and it held Bob to them, once naming Bob's attempt to reinterpret one. Task B's final session ended STUCK: Receipts showed Jev too little of a long diff, so it couldn't verify true claims about the docs. The fix is on branch `receipts-diff-budget`.
+
+Every team member runs at least one task in the Bob IDE and saves a screenshot of its task summary here.
 
 ## 6. The review pilot (item for Business Value, about 15 min per person)
 
