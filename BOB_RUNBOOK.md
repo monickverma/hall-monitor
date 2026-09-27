@@ -146,7 +146,7 @@ Task C spec:
 | B: docs | member1, Bob Shell | `2026-09-27_taskB-docs_member1.json`, `2026-09-27_taskB-docs_member1_hall-pass.html` | README.md, ARCHITECTURE.md (review fixes in the next commit) |
 | C: statements | | Still to run in the Bob IDE, with the prompt above | docs/statements.md |
 
-Tasks A and B ran headless with `bob run --mode supervised`, supervised by a stable copy of Hall Monitor (`C:/hm-stable`). Two earlier attempts at task B stopped to ask the user: their prompts held lines Hall Monitor enforced as rules, and it held Bob to them, once naming Bob's attempt to reinterpret one. Task B's final session ended STUCK: Receipts showed Jev too little of a long diff, so it couldn't verify true claims about the docs. The fix is on branch `receipts-diff-budget`.
+Tasks A and B ran headless with `bob run --mode supervised`, supervised by a stable copy of Hall Monitor (`C:/hm-stable`). Two earlier attempts at task B stopped to ask the user: their prompts held lines Hall Monitor enforced as rules, and it held Bob to them, once naming Bob's attempt to reinterpret one. Task B's final session ended STUCK on correct docs: Receipts left `.md` files out of the diff it showed Jev, so every claim about README.md met an empty diff, and it judged Bob's file headers ("README.md — E1:") as claims, leaving the items under them uncited. The fix is on branch `receipts-diff-budget`; replaying task B's real message, 10 of 17 claims are verified and none contradicted (4–5 verified before). **Merge it and refresh `C:/hm-stable` before task C**, which is a docs task too.
 
 Every team member runs at least one task in the Bob IDE and saves a screenshot of its task summary here.
 
