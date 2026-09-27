@@ -111,6 +111,27 @@ def named_files(claim, known):
     return sorted(f for f in known if f.lower() in toks or f.lower().rsplit("/", 1)[-1] in toks)
 
 
+DECISION_RE = re.compile(r"\bD(\d+)(?:\s*[-\u2013]\s*D?(\d+))?\b")
+# Only a claim that rules were *recorded* is about the ledger; "satisfies rule D3" is about the work.
+RECORDED_RE = re.compile(r"\b(record(ed|s|ing)?|extract(ed|s|ing)?)\b", re.I)
+
+
+def recorded_decisions(claim, decisions):
+    """A claim that rules were recorded ("recorded them as decisions D1-D6") is checked against the rule
+    ledger, in code. Returns None when the claim isn't about recorded decisions, else (state, code, detail).
+    Real Bob, Sept 27: such a claim named the policy file and app/auth.py, and was contradicted because
+    neither changed."""
+    ids = []
+    for a, b in DECISION_RE.findall(claim):
+        ids += [f"D{n}" for n in range(int(a), int(b or a) + 1)] if int(b or a) - int(a) < 50 else []
+    if not ids or not RECORDED_RE.search(claim):
+        return None
+    missing = [i for i in dict.fromkeys(ids) if i not in decisions]
+    if missing:
+        return "contradicted", "unknown", f"{', '.join(missing)} is not in the rule ledger."
+    return "verified", "ledger", f"{', '.join(dict.fromkeys(ids))} are in the rule ledger."
+
+
 def certify(kind, cited, named, changed, ledger, fresh, unknown=()):
     """The certificate check, in code. Returns None (go on to Jev) or (state, reason_code, detail).
     `unknown`: code files the claim names that exist nowhere in the repo (fabricated.unknown_files)."""
@@ -267,10 +288,13 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
             if kind == "not_a_claim" and isinstance(claims_or_summary, str):
                 continue
             claims.append({"claim": text, "kind": kind, "cited": cited, "from": "agent"})
-    # Obligations from the ledger are implicit claims: the finished work must satisfy them.
-    claims += [{"claim": f"The finished work satisfies the project rule {d['id']}: \"{d['text']}\"",
-                "kind": "obligation", "cited": [], "from": "ledger"}
-               for d in store.active_decisions(kind="obligation")]
+    # Obligations from the ledger are implicit claims: the finished work must satisfy them. With no edit in
+    # the evidence ledger there is no work for them to apply to: real Bob, Sept 27, a /decisions turn was
+    # asked to prove "Changes to app/auth.py require a security review" and spent its cost cap trying.
+    if any(r.get("kind") == "edit" for r in store.evidence()):
+        claims += [{"claim": f"The finished work satisfies the project rule {d['id']}: \"{d['text']}\"",
+                    "kind": "obligation", "cited": [], "from": "ledger"}
+                   for d in store.active_decisions(kind="obligation")]
     # Audit notes count only for audits Hall Monitor requested in the last round, on the same claim.
     # Anything else is ignored, so attaching notes can't be used to skip a send-back round.
     requested = sess.get("pending_audits") or {}
@@ -288,6 +312,7 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
                if f.lower() not in docs and not f.lower().endswith((".md", ".txt", ".rst", ".pdf"))}
     tests = gitutil.run_tests(store.root, cfg["test_command"])
     ledger = {r["id"]: r for r in store.evidence()}
+    decisions = {d["id"] for d in store.ledger()}  # the rule ledger, for claims about recorded rules
     known = set(gitutil.tracked_files(store.root)) | set(all_changes) | \
         {r["file"] for r in ledger.values() if r.get("file")}
     free_retry = not sess["uncited_retry_used"]
@@ -300,7 +325,8 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
         # The diff Jev is shown. A rule's own files count too: real Bob, Sept 27, "The finished work satisfies
         # D1: Add a section to README.md" was judged on a diff without README.md and contradicted every round.
         c["where"] = named_files(c["claim"], known)
-        cert = None if c["from"] == "ledger" else \
+        about_rules = recorded_decisions(c["claim"], decisions) if c["from"] == "agent" else None
+        cert = None if c["from"] == "ledger" else about_rules or \
             certify(c["kind"], c["cited"], c["named"], all_changes, ledger, tests,
                     FB.unknown_files(store.root, sess.get("base"), c["claim"], known))  # v4.2 fabricated files
         if cert and cert[1] == "uncited" and not free_retry:
