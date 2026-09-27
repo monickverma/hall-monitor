@@ -56,3 +56,18 @@ def test_a_kept_real_run_has_no_local_paths_and_no_keys(tmp_path, monkeypatch):
         raise AssertionError("a log holding a key value was kept")
     except SystemExit:
         pass
+
+
+def test_every_real_run_starts_with_the_policys_rules_recorded(tmp_path):
+    """Real Bob re-runs, Sept 27: test-first and wrong-jev-key spent their caps trying to read the policy PDF."""
+    import json
+    spec = importlib.util.spec_from_file_location("real_run", ROOT / "scripts" / "real_run.py")
+    rr = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rr)
+    assert rr.start_ledger(rr.POLICY_LEDGER, tmp_path) == 5
+    ledger = (tmp_path / ".hallmonitor" / "ledger.jsonl").read_text(encoding="utf-8")
+    rows = [json.loads(x) for x in ledger.splitlines()]
+    assert [r["id"] for r in rows] == ["D1", "D2", "D3", "D4", "D5"]  # the user's rule is the task's to record
+    assert all(r["source"].startswith("docs/security-policy.pdf") for r in rows)
+    assert all(task[3] == rr.POLICY_LEDGER for task in rr.TASKS.values())
+    assert (rr.TASKS["subagents"][1], rr.TASKS["test-first"][1]) == ("2.50", "1.20")
