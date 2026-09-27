@@ -111,7 +111,7 @@ def write_hall_pass(store):
     tok = sum(x.get("tokens", 0) for x in events)
     judged = [x for x in events if x.get("stage") in ("intent", "step", "plan", "spawn")]
     stopped = [x for x in judged if x.get("action") in ("block", "ask_human")]
-    patterns = [x["pattern"] for x in events if x.get("pattern")]
+    patterns = [x["pattern"] for x in events if x.get("pattern") and x.get("stage") != "stall"]  # stalls aren't excuses
     agents = {x.get("agent") for x in events if x.get("agent") and x.get("agent") != "main"}
     last_r = [x for x in events if x.get("stage") == "receipts"]
     rounds = len(last_r)

@@ -74,7 +74,9 @@ def test_full_state_is_rendered_and_escaped(tmp_path):
     assert "exception" in page and "escalated: deep_look" in page
     assert "KeyError" not in page
     assert "Evidence ledger: 2 receipts, 1 checkpoints" in page
-    assert summary.startswith("3 actions/intents judged, 3 stopped") and "receipts: SENT BACK" in summary
+    # the stall's pattern is shown on its timeline row but is not counted as a rationalization
+    assert summary.startswith("3 actions/intents judged, 3 stopped, 1 rationalizations named, receipts: SENT BACK")
+    assert "looping on one failure" in page
 
 
 def test_stuck_state_shows_the_restore_advice(tmp_path):
