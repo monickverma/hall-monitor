@@ -8,14 +8,73 @@ and an edit that does something other than what was declared is blocked.
 """
 import fnmatch
 import re
+import sys
 import time
 from pathlib import Path
 
-from . import evidence, jev, payload as P, policy, questions as Q
+from . import evidence, gitutil, jev, payload as P, policy, questions as Q
 from .store import is_protected, rel_path
 
 
 MAX_EDIT_CHARS = 6000  # about 1,500 Jev input tokens, well under a cent per thousand edits
+
+# A rule against new dependencies is settled in code where code can tell: a command that installs nothing, and an
+# edit whose imports are all standard library, the repo's own or already imported in the repo, add none. Real Bob,
+# Sept 27: `python -m pytest -q` (p=0.26, 0.22) and a test edit (p=0.32) went to the user as possible breaks of
+# "Do not add third-party dependencies". Anything else (an install, a manifest, another import) stays Jev's.
+DEPENDENCY_RULE_RE = re.compile(r"third[- ]party|dependenc(y|ies)|standard library|\bstdlib\b", re.I)
+INSTALL_RE = re.compile(r"\b(install|add|develop)\b", re.I)
+MANIFEST_RE = re.compile(r"requirements[\w.-]*\.(txt|in)|pyproject\.toml|setup\.(py|cfg)|pipfile|poetry\.lock|"
+                         r"package(-lock)?\.json|environment\.ya?ml", re.I)
+DOC_FILES = (".md", ".rst")
+
+
+def _imports(text):
+    """Top-level module names a piece of Python (or a diff of it) imports; relative imports are the repo's."""
+    mods = set()
+    for line in (text or "").splitlines():
+        s = re.sub(r"^[\s+>-]*", "", line)
+        m = re.match(r"from\s+(\.*)([\w.]*)\s+import\b", s)
+        if m:
+            if not m[1]:
+                mods.add(m[2].split(".")[0])
+            continue
+        m = re.match(r"import\s+([^#;]+)", s)
+        for part in (m[1].split(",") if m else []):
+            name = (part.split() or [""])[0].split(".")[0]
+            mods.add(name)
+    return mods
+
+
+def _repo_modules(root, limit=2000):
+    """Modules the repo already has or imports: its top-level folders and files, its .py files' names, and every
+    module its tracked .py files import."""
+    known = set()
+    for f in gitutil.tracked_files(root)[:limit]:
+        top = f.split("/")[0]
+        known.add(top[:-3] if top.endswith(".py") else top)
+        if f.endswith(".py"):
+            known |= {Path(f).stem} | _imports(_read(root, f, 200000))
+    return known
+
+
+def adds_no_dependency(root, action):
+    """True when code can tell that `action` adds no dependency: see DEPENDENCY_RULE_RE."""
+    if "declared_intent" in action:  # an intent's files are edited later, and each edit is checked then
+        cmds = action.get("commands") or []
+        return bool(cmds) and not action.get("files") and \
+            not any(INSTALL_RE.search(c) or MANIFEST_RE.search(c) for c in cmds)
+    target, tool = str(action.get("target") or ""), action.get("tool")
+    if tool in P.COMMAND_TOOLS:
+        return bool(target) and not (INSTALL_RE.search(target) or MANIFEST_RE.search(target))
+    if tool not in P.EDIT_TOOLS or not target or MANIFEST_RE.search(target):
+        return False
+    if target.lower().endswith(DOC_FILES):
+        return True
+    if not target.endswith(".py"):
+        return False
+    new = {m for m in _imports(action.get("content")) if m and m not in sys.stdlib_module_names and m != "__future__"}
+    return not new or new <= _repo_modules(root)
 
 def _read(root, path, limit=3000):
     try:
@@ -58,6 +117,9 @@ def judge(store, action, reason=None, check_match=False, agent="main", agent_tas
         questions["handles_failure"] = Q.HANDLES_FAILURE
     answers, usage = jev.ask(state, questions)
     viol = {d: answers[f"violates_{d}"]["noul"] for d in ids}
+    dependency_rules = [d["id"] for d in decisions if DEPENDENCY_RULE_RE.search(d["text"])]
+    if dependency_rules and adds_no_dependency(store.root, action):
+        viol.update({d: 0.0 for d in dependency_rules})
     risks = {
         "destructive": answers["destructive"]["noul"],
         # max, not noisy-or: many weak, correlated guesses must not add up to a confident violation
@@ -272,11 +334,13 @@ def pre_tool(p, store):
         # made the edit. Real Bob, Sept 27: subagent-A's limiter edit to app/service.py was checked against
         # subagent-B's newer docstring intent, blocked as a mismatch, and B's intent revoked. So an edit that
         # doesn't match the newest covering intent is checked against the other agents' before it's blocked.
-        if intent and not exact and d.action != "allow" and d.risks.get("mismatch", 0) >= 0.5:
-            for other in store.intents_covering(path=rel, command=command, exclude_agent=intent["agent"]):
+        # An uncertain mismatch too, and the same agent's older intents: real Bob, Sept 27, a test edit at mismatch
+        # 0.26 went to the user although an earlier intent of the same agent covered it.
+        if intent and not exact and d.action != "allow" and d.risks.get("mismatch", 0) >= cfg["uncertain_band"][0]:
+            for other in store.intents_covering(path=rel, command=command, exclude_id=intent["id"])[:3]:
                 d2, det2 = judge(store, action, reason=other["intent"], check_match=True, agent=other["agent"],
                                  agent_task=other.get("agent_task"))
-                if d2.risks.get("mismatch", 0) < 0.5:
+                if d2.risks.get("mismatch", 0) < min(0.5, d.risks.get("mismatch", 0)):
                     intent, reason, d, det = other, other["intent"], d2, det2
                     break
     except jev.JevRefused:
