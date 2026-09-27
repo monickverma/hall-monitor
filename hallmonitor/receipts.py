@@ -510,7 +510,7 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
               "status": status, "send_backs": sess["send_backs"], "checkpoint": cps[-1] if cps else None}
     store.write_report("receipts.md", report(result))
     store.write_report("receipts.json", json.dumps(result, indent=2))
-    store.log({"stage": "receipts", "source": source, "claims": len(rows), "action": status,
+    store.log({"stage": "receipts", "source": source, "agent": agent, "claims": len(rows), "action": status,
                "verdicts": {r["claim"][:80]: r["state"] for r in rows},
                "codes": {r["claim"][:80]: r["code"] for r in rows if r["code"]},
                "tiers": [r["tier"] for r in rows], "risky_files": risky, "send_backs": sess["send_backs"],
@@ -518,6 +518,13 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
                "mutants": sab["mutants"], "survived": len(sab["survived"]),
                "tokens": tok, "ms": int((time.time() - t0) * 1000)})
     return result
+
+
+def task_rounds(events):
+    """The task's Receipts rounds: the main agent's. A subagent's accepted round covers its part, not the task.
+    Real Bob, Sept 27: a tidy-up subagent's verified docstrings made a task look verified while the main
+    agent never submitted its own claims. (Rounds logged before agents were recorded count as the main's.)"""
+    return [e for e in events if e.get("stage") == "receipts" and e.get("agent") in (None, "main")]
 
 
 def audit_brief(claim, changed_files, tests, sab):

@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from hallmonitor import bob, report  # noqa: E402
+from hallmonitor.receipts import task_rounds  # noqa: E402
 from hallmonitor.store import Store  # noqa: E402
 
 
@@ -38,7 +39,7 @@ def main(repo, task):
         print(failure, file=sys.stderr)
     store = Store(repo)
     path, summary = report.write_hall_pass(store)
-    receipts = [e for e in store.events() if e.get("stage") == "receipts"]
+    receipts = task_rounds(store.events())  # the main agent's rounds: a subagent's verdict covers only its part
     verified = bool(receipts) and receipts[-1]["action"] == "accept"
     print(json.dumps({"bob_status": data.get("status"), "bob_stats": data.get("stats"),
                       "receipts": receipts[-1]["action"] if receipts else "none", "hall_pass": path,

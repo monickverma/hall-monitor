@@ -114,7 +114,8 @@ def write_hall_pass(store):
     stopped = [x for x in judged if x.get("action") in ("block", "ask_human", "restate")]
     patterns = [x["pattern"] for x in events if x.get("pattern") and x.get("stage") != "stall"]  # stalls aren't excuses
     agents = {x.get("agent") for x in events if x.get("agent") and x.get("agent") != "main"}
-    last_r = [x for x in events if x.get("stage") == "receipts"]
+    from .receipts import task_rounds
+    last_r = task_rounds(events)  # the task's verdict is the main agent's, not a subagent's
     rounds = len(last_r)
     status = (last_r[-1]["action"] if last_r else "in_progress")
     stamp = {"accept": ("ok", "VERIFIED"), "send_back": ("bad", "SENT BACK"), "audit": ("warn", "AUDITING"),

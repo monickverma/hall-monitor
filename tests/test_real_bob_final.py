@@ -51,3 +51,19 @@ def test_a_test_that_passes_without_the_change_breaks_that_rule(tmp_path, monkey
     change(store, "from app.rl import limit\n\ndef test_limit():\n    assert limit() is not None\n")
     rows = receipts.verify(store, [{"claim": "Raised the limit in app/rl.py.", "evidence": ["E1"]}])["rows"]
     assert next(r for r in rows if "D1" in r["claim"])["state"] == "contradicted"
+
+
+def test_a_subagents_verified_part_doesnt_make_the_task_verified(tmp_path, monkeypatch):
+    """Confirming real Bob run: subagent-B's docstring claims verified, the main agent never submitted, and the
+    Hall Pass and the CI gate read the task as VERIFIED."""
+    from hallmonitor import report
+    monkeypatch.setattr(jev, "ask", FakeJev())
+    store = repo(tmp_path)
+    change(store, "from app.rl import limit\n\ndef test_limit():\n    assert limit() == 5\n")
+    receipts.verify(store, [{"claim": "Added a docstring to app/rl.py.", "evidence": ["E1"]}], agent="subagent-B")
+    assert [e["agent"] for e in store.events() if e["stage"] == "receipts"] == ["subagent-B"]
+    assert receipts.task_rounds(store.events()) == []
+    _, summary = report.write_hall_pass(store)
+    assert "receipts: IN PROGRESS" in summary
+    receipts.verify(store, [{"claim": "Raised the limit in app/rl.py.", "evidence": ["E1"]}])
+    assert [e["agent"] for e in receipts.task_rounds(store.events())] == ["main"]
