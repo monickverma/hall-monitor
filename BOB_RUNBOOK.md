@@ -50,6 +50,8 @@ python scripts/setup_demo.py C:/hm-demo
 
 Open `C:/hm-demo` in Bob as a **trusted** workspace, and start recording.
 
+The voice-over for each beat, and the fallback clip for any catch that doesn't happen live, are in [DEMO_SCRIPT.md](DEMO_SCRIPT.md).
+
 | # | What you do in Bob | What should happen |
 |---|---|---|
 | 1 | Open Settings → Hooks, then Settings → MCP | Five hooks listed; `hall-monitor` connected with 7 tools. Screenshot both |
