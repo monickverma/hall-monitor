@@ -48,14 +48,16 @@ score = min(quality, cap of the strongest evidence). Evidence: E0 design · E1 u
 
 ## v4 tasks (T1-T6): built, tested, seen in real Bob
 
-| Task | Built | Seen in real Bob | Mechanisms (evidence) |
+Target: E4 (seen in real Bob) for what runs inside Bob, E3 (measured) for the offline evals, E5 (people's answers) for the review sheets.
+
+| Task | Built | At target | Mechanisms (evidence / target) |
 |---|---|---|---|
-| T1 Jev and safety fixes | 5/5 | 3/5 | model pinned to jev-1.13.0 (E4); a refused request falls back to code rules (E1); cost billed on input tokens only (E4); question-wording hash on every event (E4); edits to .bob/ and .hallmonitor/ blocked in code (E1) |
-| T2 feedback mid-task and the outcome check | 3/3 | 1/3 | notes reach Bob at the top of the next MCP result (E4); a failed command is recorded (E1); the next intent must deal with it (outcome check) (E1) |
-| T3 the stop rule | 2/2 | 2/2 | stuck after 2 send-backs (E4); says which checkpoint to restore (E4) |
-| T4 receipts: enough evidence, and is false sure | 4/4 | 4/4 | four claim states (E4); a claim is called false only when two readings agree (E4); code checks before Jev (E4); changed tests re-run on the code before the change (E4) |
-| T5 calibration, control set, bulk classification | 5/5 | 1/5 | (a) seeded variants with known truth (E3); (b) caught, false alarms, agreement, Brier (E3); (c) control set of 10 must-block and 10 must-allow (E3); (d) review sheets for people, with and without Hall Monitor (E1); (e) bulk classification into a review queue (E4) |
-| T6 Hall Pass v4 | 2/2 | 2/2 | loops strip, stuck state, four claim states, seeded panel (E4); features in play built from the session's log (E4) |
+| T1 Jev and safety fixes | 5/5 | 3/5 | model pinned to jev-1.13.0 (E4/E4); a refused request falls back to code rules (E1/E4); cost billed on input tokens only (E4/E4); question-wording hash on every event (E4/E4); edits to .bob/ and .hallmonitor/ blocked in code (E1/E4) |
+| T2 feedback mid-task and the outcome check | 3/3 | 1/3 | notes reach Bob at the top of the next MCP result (E4/E4); a failed command is recorded (E1/E4); the next intent must deal with it (outcome check) (E1/E4) |
+| T3 the stop rule | 2/2 | 2/2 | stuck after 2 send-backs (E4/E4); says which checkpoint to restore (E4/E4) |
+| T4 receipts: enough evidence, and is false sure | 4/4 | 4/4 | four claim states (E4/E4); a claim is called false only when two readings agree (E4/E4); code checks before Jev (E4/E4); changed tests re-run on the code before the change (E4/E4) |
+| T5 calibration, control set, bulk classification | 5/5 | 4/5 | (a) seeded variants with known truth (E3/E3); (b) caught, false alarms, agreement, Brier (E3/E3); (c) control set of 10 must-block and 10 must-allow (E3/E3); (d) review sheets for people, with and without Hall Monitor (E1/E5); (e) bulk classification into a review queue (E4/E4) |
+| T6 Hall Pass v4 | 2/2 | 2/2 | loops strip, stuck state, four claim states, seeded panel (E4/E4); features in play built from the session's log (E4/E4) |
 
 ## Submission evidence
 

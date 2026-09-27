@@ -176,6 +176,20 @@ class Store:
                 rejected = it
         return rejected
 
+    def intents_covering(self, path=None, command=None, exclude_agent=None, max_age=1800):
+        """Every other agent's non-rejected intent covering this file or command, newest first."""
+        norm = lambda x: str(x).replace("\\", "/").lstrip("./").lower()
+        out = []
+        for it in reversed(self.session()["intents"]):
+            if time.time() - it["t"] > max_age:
+                break
+            if it["verdict"] == "rejected" or it.get("agent") == exclude_agent:
+                continue
+            if (path and norm(path) in {norm(f) for f in it.get("files", [])}) or \
+                    (command and any(command.strip().startswith(c.strip()) for c in it.get("commands", []) if c.strip())):
+                out.append(it)
+        return out
+
     def active_intents(self, exclude_agent=None, max_age=1800):
         return [it for it in self.session()["intents"]
                 if time.time() - it["t"] <= max_age and it["verdict"] != "rejected"

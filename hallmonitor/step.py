@@ -268,6 +268,17 @@ def pre_tool(p, store):
                        agent=intent["agent"] if intent else "main",
                        agent_task=intent.get("agent_task") if intent else None,
                        deep=bool(rel and rel in sess["suspect_files"]))  # v4 loop L4 -> L1
+        # Parallel agents can each have an approved intent for the same file, and the hook can't tell which agent
+        # made the edit. Real Bob, Sept 27: subagent-A's limiter edit to app/service.py was checked against
+        # subagent-B's newer docstring intent, blocked as a mismatch, and B's intent revoked. So an edit that
+        # doesn't match the newest covering intent is checked against the other agents' before it's blocked.
+        if intent and not exact and d.action != "allow" and d.risks.get("mismatch", 0) >= 0.5:
+            for other in store.intents_covering(path=rel, command=command, exclude_agent=intent["agent"]):
+                d2, det2 = judge(store, action, reason=other["intent"], check_match=True, agent=other["agent"],
+                                 agent_task=other.get("agent_task"))
+                if d2.risks.get("mismatch", 0) < 0.5:
+                    intent, reason, d, det = other, other["intent"], d2, det2
+                    break
     except jev.JevRefused:
         # Decided by code alone. Only a command that is exactly one an approved intent declared goes ahead:
         # that exact command was already judged (destructive? breaks a rule?) when the intent was approved.
