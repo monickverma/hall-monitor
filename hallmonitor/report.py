@@ -270,7 +270,7 @@ def write_hall_pass(store):
         note = (f'{s["claims"]} claims we seeded ourselves across {s["variants"]} variants, model {s["model"]}'
                 + (f'; {s["label_corrections"]} label corrected after scoring, disclosed' if s["label_corrections"] else "")
                 + (f'; this session ran {jev.MODEL}, so these numbers don\'t apply to it' if s["model"] != jev.MODEL else ""))
-        seeded_html = (f'<h2>Receipts checked against seeded errors</h2><section><table>' +
+        seeded_html = ('<h2>Receipts checked against seeded errors</h2><section><table>' +
                        "".join(f'<tr><td class="why">{e(l)}</td></tr>' for l in lines) +
                        f'<tr><td class="stage">{e(note)}</td></tr></table></section>')
     page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">

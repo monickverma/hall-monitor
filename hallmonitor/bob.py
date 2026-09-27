@@ -66,19 +66,30 @@ def _record(root, mode, prompt, data):
     from .store import Store
     store = Store(root)
     stats = data.get("stats") or {}
-    store._append("bob_runs.jsonl", {"t": time.time(), "mode": mode, "prompt": prompt[:300],
-                                     "status": data.get("status"), "stats": stats})
+    row = {"t": time.time(), "mode": mode, "prompt": prompt[:300], "status": data.get("status"), "stats": stats}
+    if data.get("error"):  # why a run failed. Real Bob, Sept 27: every audit was "unparsed", and nothing said why
+        error = str(data["error"])[-300:]
+        for name in ("BOB_API_KEY", "TYPESAFE_API_KEY"):
+            if len(os.environ.get(name) or "") >= 8:
+                error = error.replace(os.environ[name], f"<{name}>")
+        row["error"] = error
+    store._append("bob_runs.jsonl", row)
     store.log({"stage": "bob_run", "action": data.get("status") or "done", "target": f"bob run --mode {mode}",
                "bob_stats": {k: stats.get(k) for k in ("session_costs", "tool_calls", "total_tokens", "duration_ms")
                              if k in stats}})
 
 
 def shell_audit(root, brief, max_cost="0.30", max_turns="8", timeout=240):
-    """Audit one claim with the read-only Receipts Auditor mode. Returns the auditor's final message."""
+    """Audit one claim with the read-only Receipts Auditor mode. Returns the auditor's final message, or None
+    when there's no audit to use: a run that failed before its task ran ("unparsed") leaves only its error
+    output, which must not count as an audit. Real Bob, Sept 27: Bob starts the MCP server without
+    BOB_API_KEY, so every audit ended with "Bob API key is required" and the supervised Bob audited instead."""
     data = _run(root, "hm-auditor", brief, max_cost, max_turns, timeout)
     if not data:
         return None
     _record(root, "hm-auditor", brief, data)
+    if data.get("status") == "unparsed":
+        return None
     return str(data.get("last_message") or "")[:3000] or None
 
 

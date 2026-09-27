@@ -1,4 +1,5 @@
 """Evidence collection: what changed, a fresh test run, sabotage probes, and checkpoints."""
+import ast
 import io
 import os
 import re
@@ -196,6 +197,54 @@ def string_lines(text):
     except (tokenize.TokenError, SyntaxError):  # a file that doesn't parse: mutate its lines as before
         pass
     return rows
+
+
+def inert_lines(text):
+    """Line numbers of a Python file that do nothing when it runs: blank lines, comments, and string statements
+    such as docstrings. None when the file doesn't parse."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return None
+    rows = {n for n, line in enumerate(text.splitlines(), 1) if not line.strip() or line.strip().startswith("#")}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            rows.update(range(node.lineno, node.end_lineno + 1))
+    return rows
+
+
+def _removed(root, base, path):
+    """(line number at `base`, text) of each line removed from `path` since `base`."""
+    out, n = [], None
+    for line in git(root, "diff", "--unified=0", base, "--", path).splitlines():
+        if line.startswith("@@"):
+            n = int(re.match(r"@@ -(\d+)", line)[1])
+        elif n is not None and line.startswith("-") and not line.startswith("---"):
+            out.append((n, line[1:]))
+            n += 1
+    return out
+
+
+def behavior_lines(root, base, changes_):
+    """(path, line) of each changed line outside the tests that can change what the code does: every added or
+    removed line except blank lines, comments and docstrings. Other files count whole, except dotfiles such as
+    .gitignore. Real Bob, Sept 27: a task that only added a docstring to app/__init__.py was held to "Every
+    behavior change must ship with a test that fails without the change", and Jev contradicted it."""
+    out = []
+    for path, c in changes_.items():
+        if is_test(path) or Path(path).name.startswith("."):
+            continue
+        removed = _removed(root, base, path) if c["status"] == "modified" else []
+        if not path.endswith(".py"):
+            out += [(path, n) for n, _ in c["added"]] + [(path, -n) for n, _ in removed]
+            continue
+        now = inert_lines((Path(root) / path).read_text(encoding="utf-8", errors="replace"))
+        then = inert_lines(git(root, "show", f"{base}:{path}")) if removed else set()
+        if now is None or then is None:  # a file that doesn't parse counts whole
+            now, then = set(), set()
+        out += [(path, n) for n, _ in c["added"] if n not in now]
+        out += [(path, -n) for n, _ in removed if n not in then]
+    return out
 
 
 def plan_mutants(root, changes_, max_mutants=4):
