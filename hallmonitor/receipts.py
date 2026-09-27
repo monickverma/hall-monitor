@@ -31,7 +31,7 @@ import json
 import re
 import time
 
-from . import bob, brief, evidence as EV, gitutil, jev, policy, questions as Q
+from . import bob, brief, evidence as EV, fabricated as FB, gitutil, jev, policy, questions as Q
 
 # Evidence for claims judged without citations (after the free retry, and Hall Monitor's own
 # obligation claims), per claim kind (less noise, fewer tokens).
@@ -78,8 +78,11 @@ def named_files(claim, known):
     return sorted(f for f in known if f.lower() in toks or f.lower().rsplit("/", 1)[-1] in toks)
 
 
-def certify(kind, cited, named, changed, ledger, fresh):
-    """The certificate check, in code. Returns None (go on to Jev) or (state, reason_code, detail)."""
+def certify(kind, cited, named, changed, ledger, fresh, unknown=()):
+    """The certificate check, in code. Returns None (go on to Jev) or (state, reason_code, detail).
+    `unknown`: code files the claim names that exist nowhere in the repo (fabricated.unknown_files)."""
+    if unknown and kind in CHANGE_KINDS:  # v4.2: a claim about a file that doesn't exist is false, however cited
+        return "contradicted", "unknown_file", FB.message(unknown)
     # What the claim itself says about files is decided first: a claim that files changed when none of
     # them did (or that a file wasn't touched when it was) is contradicted however it is cited.
     if named:
@@ -206,7 +209,8 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
     for c in claims:
         c["named"] = named_files(c["claim"], known) if c["from"] == "agent" else []
         cert = None if c["from"] == "ledger" else \
-            certify(c["kind"], c["cited"], c["named"], all_changes, ledger, tests)
+            certify(c["kind"], c["cited"], c["named"], all_changes, ledger, tests,
+                    FB.unknown_files(store.root, sess.get("base"), c["claim"], known))  # v4.2 fabricated files
         if cert and cert[1] == "uncited" and not free_retry:
             cert, c["uncited_fallback"] = None, True  # after the free retry: judged the old way, marked uncited
         c["cert"] = cert
