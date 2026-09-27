@@ -7,8 +7,9 @@ the strongest evidence behind it, which is computed from the repo:
 score = min(quality, cap), so a good design with weak proof can't score high.
 
 Reads only files: eval/summary.json, eval/control_set.json (python eval/control_set.py --json), the review
-minutes, bob_sessions/*.json with their Hall Passes, and any real Bob run folders given with --runs (a run is
-a repo whose .hallmonitor/bob_runs.jsonl records a supervised `bob run`). Spends no Jev and starts no Bob.
+minutes, bob_sessions/*.json with their Hall Passes, the real Bob runs kept in eval/real_runs/, and any more
+run folders given with --runs (a run is a folder whose .hallmonitor/bob_runs.jsonl records a supervised
+`bob run`). Spends no Jev and starts no Bob.
 
 Usage: python eval/scorecard.py [--runs DIR ...]      writes eval/scorecard.md and prints it
 """
@@ -30,7 +31,8 @@ CAP = {"E0": 3, "E1": 5, "E2": 6, "E3": 8, "E4": 9, "E5": 10}
 RUBRIC = {
     "receipts": (0.25, 8, "Per-claim verdicts on evidence Hall Monitor produced itself (fresh tests, sabotage)"),
     "step monitor": (0.20, 7.5, "Least-harm judgment of every intent; excuses named; code rules before Jev"),
-    "robustness in real Bob": (0.15, 5, "Real Bob found 7 bugs in one day (Sept 27), all false alarms, all fixed"),
+    "robustness in real Bob": (0.15, 5, "Real Bob found 12 bugs on Sept 27, all false alarms; all fixed, the last "
+                                        "5 not yet re-run in real Bob"),
     "explainability": (0.10, 8, "Hall Pass built from the session's own log; says why a task stopped"),
     "rules and plan": (0.10, 7, "Policy PDF and prompt lines become rules; plan gate on PLAN.md"),
     "drift and stalls": (0.05, 6, "Named stall patterns and checkpoints; one real false stall, fixed"),
@@ -118,7 +120,8 @@ def levels(ev):
         ("E3", "seeded eval") if seeded else ("E1", "unit tests")
     # Judging intents in real Bob isn't enough: its value is the catch, so E4 needs an excuse named in a real run.
     judged = sum(r["judged"] for r in full)
-    lvl["step monitor"] = ("E4", f"{sum(r['excuses'] for r in full)} excuses named in real Bob") \
+    caught = sum(r["excuses"] for r in full)
+    lvl["step monitor"] = ("E4", f"{caught} excuse{'' if caught == 1 else 's'} named in real Bob") \
         if any(r["excuses"] for r in full) else \
         ("E3", f"control set; {judged} actions judged in real Bob, no excuse caught there yet") if control else \
         ("E2", "simulate.py")
@@ -197,8 +200,8 @@ def render(ev):
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser()
-    ap.add_argument("--runs", nargs="*", default=[], help="folders holding real Bob run repos")
-    text = render(collect(ap.parse_args().runs))
+    ap.add_argument("--runs", nargs="*", default=[], help="more folders holding real Bob run repos")
+    text = render(collect([ROOT / "eval" / "real_runs", *ap.parse_args().runs]))
     (ROOT / "eval" / "scorecard.md").write_text(text, encoding="utf-8")
     print(text)
 

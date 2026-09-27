@@ -72,6 +72,8 @@ Numbers are from `eval/summary.json` (on claims we seeded ourselves) and `eval/r
 
 **Human review pilot:** no data yet.
 
+**Scorecard** (`python eval/scorecard.py`, writes `eval/scorecard.md`): each part of Hall Monitor is rated for quality, capped by the strongest evidence behind it (design, unit tests, the scripted run, seeded cases, real Bob runs, real people). It reads the eval files above and the real Bob Shell runs kept in `eval/real_runs/`.
+
 ## Run the scripted demo (no Bob needed)
 
 ```bash
