@@ -1,0 +1,4 @@
+{"id": "D1", "text": "Changes to app/auth.py require a review by the security team before they are merged.", "source": "docs/security-policy.pdf \u00a72", "kind": "obligation", "recorded_at": "2026-09-27T18:09:40+00:00", "supersedes": null}
+{"id": "D2", "text": "Password comparison must remain constant-time.", "source": "docs/security-policy.pdf \u00a72", "kind": "obligation", "recorded_at": "2026-09-27T18:09:43+00:00", "supersedes": null}
+{"id": "D3", "text": "Services must use only the Python standard library. No third-party dependencies.", "source": "docs/security-policy.pdf \u00a73", "kind": "limit", "recorded_at": "2026-09-27T18:09:45+00:00", "supersedes": null}
+{"id": "D4", "text": "Every behavior change must ship with a test that fails without the change.", "source": "docs/security-policy.pdf \u00a74", "kind": "obligation", "recorded_at": "2026-09-27T18:09:48+00:00", "supersedes": null}
