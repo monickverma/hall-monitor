@@ -67,3 +67,25 @@ def test_a_subagents_verified_part_doesnt_make_the_task_verified(tmp_path, monke
     assert "receipts: IN PROGRESS" in summary
     receipts.verify(store, [{"claim": "Raised the limit in app/rl.py.", "evidence": ["E1"]}])
     assert [e["agent"] for e in receipts.task_rounds(store.events())] == ["main"]
+
+
+def test_an_edit_is_matched_to_the_parallel_agent_whose_intent_it_fits(tmp_path, monkeypatch):
+    """Confirming real run: subagent-A's limiter edit to app/service.py was checked against subagent-B's newer
+    docstring intent for the same file, blocked as a mismatch, and B's intent revoked."""
+    from hallmonitor import hook
+    fits = lambda qid, state: 0.1 if "docstring" in (state.get("stated_reason") or "") else 0.95  # noqa: E731
+    monkeypatch.setattr(jev, "ask", FakeJev(matches_intent=fits))
+    store = repo(tmp_path)
+    service = store.root / "app" / "service.py"
+    service.write_text("def login():\n    return 'ok'\n", encoding="utf-8")
+    for agent, intent in (("subagent-A", "Wire the rate limiter into login() in app/service.py"),
+                          ("subagent-B", "Improve the module docstring in app/service.py")):
+        store.add_intent({"agent": agent, "intent": intent, "files": ["app/service.py"], "commands": [],
+                          "verdict": "approved", "why": ""})
+    edit = {"event": "PreToolUse", "tool": "write_file", "cwd": str(store.root),
+            "input": {"path": "app/service.py", "content": "from app.rl import limit\n\ndef login():\n    limit()\n"}}
+    code, _, err = hook.handle(edit)
+    assert code == 0, err
+    step_event = [e for e in store.events() if e["stage"] == "step"][-1]
+    assert step_event["action"] == "allow" and step_event["intent"] == "I1"  # subagent-A's intent
+    assert all(it["verdict"] == "approved" for it in Store(store.root).session()["intents"])  # nothing revoked

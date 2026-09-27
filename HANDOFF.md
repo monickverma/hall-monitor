@@ -131,6 +131,22 @@ sys.exit(0 if rec and rec[-1]["action"] == "accept" else 1)
 - Paid Bob runs need the user's go-ahead.
 - End commit messages with the `Co-Authored-By` line.
 
-## Investigation in progress (issue 1, from the logs, no paid runs)
+## Investigation of issue 1 (from the logs, no paid runs): done, one fix pushed
 
-The cloud session was reading the two stops in the last subagent run, to decide whether each was right or a false stop, fix false ones in `hallmonitor/step.py` with a test from the real event, and push to this branch. See the latest commits on `claude/eloquent-mendel-r6r34y` for where it got to.
+The last subagent run had 2 stops.
+
+- **Stop 1 was a false block, and it's fixed on this branch.** Both subagents had approved intents covering
+  `app/service.py`: A's I3 (wire in the limiter) and B's newer I4 (docstrings). The hook can't tell which
+  agent made an edit, so A's limiter edit was checked against I4 because I4 was the newest. It was blocked as
+  a mismatch (0.66), B's intent was revoked, and turns went on `explain_block` and redoing work.
+  - The fix, in `step.pre_tool`: an edit that doesn't match the newest covering intent is checked against the
+    other agents' covering intents (`store.intents_covering`) before it's blocked. It's blocked, and an intent
+    revoked, only if it matches none. There's one extra Jev call, and only in that case.
+  - Test: `tests/test_real_bob_final.py::test_an_edit_is_matched_to_the_parallel_agent_whose_intent_it_fits`,
+    which fails on the old code.
+  - Gates: 159 tests; control set 20/20; `simulate.py` VERIFIED with 9 stops, twice, step for step the same.
+    The demo's real mismatch catch still fires.
+- **Stop 2 is left as it is.** It was an ask_human on a test edit, where Jev was unsure about a rule (0.32).
+  The retry was allowed at once. This is calibrated noise, not a logic error.
+- **Next:** one paid real run of the subagent task at a $1.50 cap (issue 1 above) to confirm that the main
+  agent now gets to submit.
