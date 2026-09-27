@@ -22,13 +22,13 @@ def test_a_real_run_is_read_from_its_log(tmp_path):
         {"stage": "step", "action": "allow", "target": "README.md"},
         {"stage": "receipts", "source": "mcp", "action": "send_back", "tokens": 2000},
         {"stage": "receipts", "source": "mcp", "action": "accept"},
-        {"stage": "receipts", "source": "stop", "action": "stuck"}],  # the Stop backstop isn't a round
+        {"stage": "receipts", "source": "stop", "action": "stuck"}],  # the Stop backstop counts, as on the Hall Pass
         {"session_costs": 0.4, "duration_ms": 90000})
     (tmp_path / "replay" / ".hallmonitor").mkdir(parents=True)  # no supervised bob run: not a real run
     runs = [scorecard.real_run(hm) for hm in sorted(tmp_path.rglob(".hallmonitor"))]
     run = next(r for r in runs if r)
     assert runs.count(None) == 1
-    assert (run["first"], run["final"], run["send_backs"]) == ("send_back", "accept", 1)
+    assert (run["first"], run["final"], run["send_backs"]) == ("send_back", "stuck", 2)
     assert (run["judged"], run["stops"], run["stops_later_allowed"], run["excuses"]) == (2, 1, 1, 0)
     assert run["bob_usd"] == 0.4 and run["minutes"] == 1.5
 
