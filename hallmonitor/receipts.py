@@ -137,12 +137,58 @@ CONDITIONAL_RE = re.compile(r"^\s*(any\s+)?(changes?|edits?|modifications?)\s+(t
                             r"|\b(if|when|whenever)\b.{0,80}\b(chang|edit|modif|touch)", re.I)
 
 
+# What a scoped rule is about: the words before its "must" ("Password comparison must use a constant-time ...").
+SUBJECT_RE = re.compile(r"^\s*([^.;:()]{1,80}?)\s+(must|should|shall|needs? to|ha(s|ve) to|(is|are) required)\b",
+                        re.I)
+# A subject made only of these words is about every change, so the rule always applies: "Every behavior change
+# must ship with a test", "Tests must assert on the specific changed behavior", "New code must ...".
+EVERY_CHANGE = set("""a an the all any each every new our your this that these those to of in on for with by and or
+    behavior behaviour behaviors behaviours change changes changed code test tests testing work commit commits
+    feature features function functions method methods class classes file files module modules pr prs patch
+    patches edit edits fix fixes implementation implementations public api apis endpoint endpoints project
+    repo repository program programs software finished final complete completed whole entire pull request
+    requests merge merges release releases branch branches diff diffs message messages documentation docs doc
+    readme changelog""".split())
+COMMENT_RE = re.compile(r"(^|\s)#.*$|^\s*(//|/\*|\*).*$")  # `*` and `//` are Python operators mid-line
+
+
+def _stem(word):
+    for suffix in ("isons", "ison", "ations", "ation", "ings", "ing", "ed", "es", "s"):
+        if word.endswith(suffix) and len(word) - len(suffix) >= 4:
+            return word[:-len(suffix)]
+    return word
+
+
+def untouched_subject(rule, changed):
+    """The words of a scoped rule's subject when no changed code line (added or removed, comments aside) and no
+    changed code file's path mentions any of them, else None. Real Bob, Sept 27: "Password comparison must use a
+    constant-time algorithm" came back "needs evidence" on a rate-limit change with no password code, and Bob
+    spent the rest of its cost cap answering it. A rule with no subject ("Do not add ...") or one about every
+    change ("Every behavior change must ship with a test") always applies."""
+    m = SUBJECT_RE.match(rule)
+    words = [w for w in re.findall(r"[a-z]+", m[1].lower()) if w not in EVERY_CHANGE] if m else []
+    if not words:
+        return None
+    code = [(f, c) for f, c in changed.items() if not f.lower().endswith((".md", ".txt", ".rst", ".pdf"))]
+    text = "\n".join([f.lower() for f, _ in code] + [
+        COMMENT_RE.sub("", line).lower() for _, c in code
+        for line in [t for _, t in c["added"]] + list(c.get("removed_lines", []))])
+    if any(_stem(w) in text for w in words):
+        return None
+    return m[1].strip()
+
+
 def not_applicable(rule, files, changed):
     """A rule about changes to certain files ("Changes to app/auth.py require a security review") holds when
     none of them changed. Real Bob, Sept 27: that rule came back "needs evidence" every round of a task that
-    never touched app/auth.py, until the task was STUCK. Returns None when the rule does apply."""
+    never touched app/auth.py, until the task was STUCK. So does a rule about one kind of code that the change
+    doesn't touch (untouched_subject). Returns None when the rule does apply."""
     if files and CONDITIONAL_RE.search(rule) and not any(f in changed for f in files):
         return "verified", "not_applicable", f"{', '.join(files)} didn't change, so this rule doesn't apply."
+    subject = None if files else untouched_subject(rule, changed)
+    if subject:
+        return ("verified", "not_applicable",
+                f"No changed code mentions {subject.lower()}, so this rule doesn't apply to this change.")
     return None
 
 
