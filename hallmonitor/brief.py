@@ -3,7 +3,7 @@ import re
 import time
 from pathlib import Path
 
-from . import gitutil, jev, payload as P, questions as Q
+from . import gitutil, jev, lessons, payload as P, questions as Q
 
 
 def sentences(text, limit=12):
@@ -12,7 +12,9 @@ def sentences(text, limit=12):
     return [s for s in out if len(s.split()) >= 3][:limit]
 
 
-def _brief(store, extra=None):
+def _brief(store, extra=None, optional=None):
+    """The briefing. `optional` lines (the last session's lessons) go after the decisions, and only as
+    many as fit within max_brief_chars, so they never push out the findings or the protocol."""
     cfg, sess = store.config(), store.session()
     lines = ["[Hall Monitor]"]
     if sess.get("goal"):
@@ -23,14 +25,23 @@ def _brief(store, extra=None):
         lines += [f"- {d['id']}: {d['text']}" + (" (checked when you finish)" if d.get("kind") == "obligation" else "")
                   for d in decisions]
     lines += extra or []
-    notes = store.pop_notes()
+    at = len(lines)
+    notes = store.pop_pending()
     if notes:
         lines.append("Hall Monitor findings to address first:")
         lines += [f"- {n}" for n in notes]
     lines.append("Protocol: call hall-monitor declare_intent before any edit or command; if a tool is reported "
-                 "as blocked, call explain_block to learn why; when done, call "
-                 f"submit_claims (or write {cfg['claims_file']}). Claims are checked against the diff, a fresh "
-                 "test run and sabotage probes.")
+                 "as blocked, call explain_block to learn why; when done, call list_evidence, then "
+                 "submit_claims with each claim citing the receipt IDs (E1, E2, ...) that prove it. Claims are "
+                 "checked against those receipts, the diff, a fresh test run and sabotage probes.")
+    room, fit = cfg["max_brief_chars"] - len("\n".join(lines)), []
+    for line in optional or []:
+        if len(line) + 1 > room:
+            break
+        fit.append(line)
+        room -= len(line) + 1
+    if len(fit) > 1:  # a heading with at least one line under it
+        lines[at:at] = fit
     return "\n".join(lines)[:cfg["max_brief_chars"]]
 
 
@@ -45,9 +56,10 @@ def session_start(p, store):
     sess = store.session()
     sess.update(base=gitutil.head(store.root), actions=[], commands=[], off_task_streak=0)
     store.save_session(sess)
+    learned = lessons.brief_lines(store)  # v4.2: the last session's lessons, read before this one is logged
     store.log({"stage": "session_start", "action": "brief", "decisions": len(store.active_decisions()),
-               "tokens": tok})
-    return 0, _brief(store), ""
+               "tokens": tok, "lessons": len(learned[1:]) or None})
+    return 0, _brief(store, optional=learned), ""
 
 
 def _start_here(store, goal, max_files=40):
@@ -88,6 +100,11 @@ def user_prompt(p, store):
     new_task = sess.get("goal") is None or answers["new_task"]["noul"] >= 0.5
     if new_task:
         sess["goal"] = text[:600]
+        # A new task starts its own Receipts rounds. Real Bob, Sept 27: a task began one send-back from STUCK
+        # because the count from the task before it (a /decisions turn) carried over.
+        sess.update({"send_backs": 0, "last_send_back": None, "uncited_retry_used": False, "pending_audits": {},
+                     "suspect_files": {}, "fresh_intent_needed": {}})
+    sess["stalls"] = 0  # the user has stepped in: the stall counter starts again
     added = []
     for i, s in enumerate(sents):
         if answers[f"decision_{i}"]["noul"] < 0.6:

@@ -13,17 +13,11 @@ Every screenshot you take here doubles as the **Bob task session evidence** the 
 
 ## Steps
 
-1. Copy the demo repo somewhere and make it a git repo:
+1. From the `hall-monitor` folder, create the probe repo. This copies the demo login service to `C:/hm-probe`, makes it a git repo, and installs the **probe** hooks. They record raw payloads and allow everything; the MCP server is installed as normal:
    ```bash
-   python -c "import shutil; shutil.copytree('demo/template', 'C:/hm-probe')"
-   git -C C:/hm-probe init -q
-   git -C C:/hm-probe add -A
-   git -C C:/hm-probe commit -qm init
+   python scripts/setup_demo.py C:/hm-probe --probe
    ```
-2. Install the **probe** hooks. They record raw payloads and allow everything; the MCP server is installed as normal:
-   ```bash
-   python scripts/install.py --probe C:/hm-probe
-   ```
+2. Make sure `TYPESAFE_API_KEY` is set in the environment Bob runs in (for example with `setx`, then restart Bob). Never put it in a file in the repo.
 3. Open `C:/hm-probe` in Bob as a **trusted workspace**, because hooks respect workspace trust. Take these screenshots:
    - **Settings → Hooks** showing the five hooks.
    - **Settings → MCP** showing `hall-monitor` connected with 6 tools.
@@ -36,10 +30,20 @@ Every screenshot you take here doubles as the **Bob task session evidence** the 
    Screenshot the **parallel subagents panel** and note whether you had to approve anything: MCP calls, the subagent spawn.
 5. In **Plan mode**, ask for a plan to add a rate limiter. Note the path of the plan file it writes.
 6. If Bob Shell is installed, run: `bob run --format json "Create notes2.txt containing 'x'" --workspace C:/hm-probe > run.json`.
-7. Read the results:
+7. **Evidence-carrying claims (v4.1).** In Agent mode, ask Bob: "Call the hall-monitor tool list_evidence, then
+   call submit_claims with claims `[{"claim": "created notes.txt", "evidence": ["E1"]}]`." The report shows
+   whether Bob could send an array of objects.
+8. **Checkpoints and Bob's rollback (v4.1).** Create one checkpoint ref by hand, then use Bob's rollback once
+   and confirm it still works:
+   ```bash
+   git -C C:/hm-probe update-ref refs/hallmonitor/C1 HEAD
+   ```
+9. Read the results:
    ```bash
    python scripts/probe_report.py C:/hm-probe
    ```
+   Items 7–9 of the report answer the v4.1 checks: whether PostToolUse carries a command's output and exit
+   code, whether Bob can send claims as objects, and whether checkpoint refs coexist with Bob's rollback.
 
 ## What to do with the answers
 
@@ -52,5 +56,9 @@ Every screenshot you take here doubles as the **Bob task session evidence** the 
 | They can't | Drop that step from `bob/custom_modes.yaml` and the protocol skill; rely on the spawn checks |
 | MCP calls still asked for approval | Remove `alwaysAllow` from install.py and approve once in the demo |
 | The plan file path | Add it to `plan_globs` in `hallmonitor/store.py` |
+| PostToolUse has no command output | Receipts can't read test results from Bob's runs: rely on Receipts' own fresh test run and say so |
+| PostToolUse has no exit code | Nothing to change: pass/fail is inferred from the output (`status_source: inferred`) |
+| Bob can't send claims as objects | Nothing to change: plain-string claims with inline citations like `[E7]` work too |
+| Bob's rollback breaks with `refs/hallmonitor/*` present | Set checkpoints aside (skip `gitutil.checkpoint` in `evidence.record`) and rely on Bob's rollback |
 
 Then install for real with `python scripts/install.py C:/hm-probe` and record the demo.

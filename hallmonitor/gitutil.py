@@ -1,11 +1,15 @@
-"""Evidence collection: what changed, a fresh test run, and sabotage probes."""
+"""Evidence collection: what changed, a fresh test run, sabotage probes, and checkpoints."""
+import os
 import re
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 
-def git(root, *args):
-    r = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, encoding="utf-8")
+def git(root, *args, env=None):
+    r = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, encoding="utf-8",
+                       env={**os.environ, **env} if env else None)
     return r.stdout
 
 
@@ -15,6 +19,38 @@ def head(root):
 
 def tracked_files(root):
     return [f for f in git(root, "ls-files").splitlines() if f]
+
+
+def checkpoint(root, n, last_tree=None):
+    """Snapshot the working tree as refs/hallmonitor/C<n>.
+
+    Uses a private index file, then commit-tree and update-ref, so the working tree, the real index and
+    the branch are never touched. Returns {ref, commit, tree}, or None if nothing changed since the
+    last checkpoint (`last_tree`) or this isn't a git repository.
+    """
+    root = Path(root)
+    env = {"GIT_INDEX_FILE": str(root / ".hallmonitor" / "cp.index"),
+           "GIT_AUTHOR_NAME": "Hall Monitor", "GIT_AUTHOR_EMAIL": "hall-monitor@localhost",
+           "GIT_COMMITTER_NAME": "Hall Monitor", "GIT_COMMITTER_EMAIL": "hall-monitor@localhost"}
+    parent = head(root)
+    if parent:
+        git(root, "read-tree", "HEAD", env=env)
+    git(root, "add", "-A", env=env)
+    tree = git(root, "write-tree", env=env).strip()
+    if not tree or tree == last_tree:
+        return None
+    commit = git(root, "commit-tree", tree, "-m", f"hall monitor checkpoint C{n}",
+                 *(["-p", parent] if parent else []), env=env).strip()
+    if not commit:
+        return None
+    ref = f"refs/hallmonitor/C{n}"
+    git(root, "update-ref", ref, commit)
+    return {"ref": ref, "commit": commit, "tree": tree}
+
+
+def diff_from(root, ref):
+    """What changed in the working tree since a checkpoint (tracked files)."""
+    return git(root, "diff", ref)
 
 
 def changes(root, base):
@@ -51,22 +87,59 @@ def changes(root, base):
     return out
 
 
-def diff_text(changes_, max_chars=3500):
+def diff_text(changes_, max_chars=3500, max_lines=200):
+    # Real Bob, Sept 27: at 60 lines per file, Jev never saw most of a long doc edit, so true claims about
+    # it came back "says nothing". Say what's left out, so a cut is never read as an absence.
+    # An added line numbered None is a marker a caller put in (receipts' excerpts), shown as is.
     parts = []
     for path, c in changes_.items():
-        body = "\n".join(f"+{t}" for _, t in c["added"][:60])
-        parts.append(f"--- {path} ({c['status']}, +{len(c['added'])} -{c['removed']})\n{body}")
-    return "\n".join(parts)[:max_chars]
+        added = c["added"]
+        body = "\n".join(t if n is None else f"+{t}" for n, t in added[:max_lines])
+        if len(added) > max_lines:
+            body += f"\n[... {len(added) - max_lines} more added lines not shown]"
+        parts.append(f"--- {path} ({c['status']}, +{c.get('total_added', len(added))} -{c['removed']})\n{body}")
+    text = "\n".join(parts)
+    if len(text) > max_chars:
+        text = text[:max_chars] + f"\n[... {len(text) - max_chars} more characters of the diff not shown]"
+    return text
 
 
-def run_tests(root, cmd, timeout=120):
+def run_tests(root, cmd, timeout=120, copy=False):
+    """Run the test command in `root`. With copy=True (`root` is a scratch copy of the repo), the copy
+    goes first on PYTHONPATH, so an editable install of the original can't answer for it, and no bytecode
+    is written, so two mutants of one file can't share a stale .pyc."""
+    env = None
+    if copy:
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1",
+               "PYTHONPATH": os.pathsep.join([str(root)] + [p for p in [os.environ.get("PYTHONPATH")] if p])}
     try:
         r = subprocess.run(cmd, cwd=root, shell=True, capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=timeout)
+                           encoding="utf-8", errors="replace", timeout=timeout, env=env)
         tail = (r.stdout + r.stderr).strip().splitlines()[-6:]
         return {"command": cmd, "passed": r.returncode == 0, "exit_code": r.returncode, "tail": tail}
     except subprocess.TimeoutExpired:
         return {"command": cmd, "passed": False, "exit_code": None, "tail": ["timed out"]}
+
+
+COPY_SKIP = {".git", ".hallmonitor", "node_modules", ".venv", "venv", "__pycache__", ".pytest_cache", ".tox"}
+
+
+def copy_tree(root, dest):
+    """Copy what `git add -A` would snapshot (tracked plus untracked, not ignored) into `dest`, for
+    mutants that must never touch the working tree."""
+    root, dest = Path(root), Path(dest)
+    files = git(root, "ls-files", "-co", "--exclude-standard").splitlines()
+    if not files:  # not a git repository: copy the tree, minus caches and Hall Monitor's own state
+        shutil.copytree(root, dest, dirs_exist_ok=True, ignore=shutil.ignore_patterns(*COPY_SKIP, "*.pyc"))
+        return
+    for f in files:
+        src = root / f
+        if src.is_file() and not f.endswith(".pyc") and not COPY_SKIP & set(Path(f).parts):
+            (dest / f).parent.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.copy2(src, dest / f)
+            except OSError:  # a locked file: the copy's own test run shows whether it mattered
+                continue
 
 
 # Mutation operators applied to changed, non-test source lines.
@@ -86,32 +159,71 @@ def is_test(path):
     return name.startswith("test_") or name.endswith("_test.py") or "tests/" in path.replace("\\", "/")
 
 
-def sabotage(root, changes_, cmd, max_mutants=4):
-    """Break changed source lines one at a time and rerun the tests.
+def fail_before(root, base, changes_, cmd, timeout=120):
+    """Fail-before/pass-after (v4 design): the changed tests, run in a scratch copy where the changed code is
+    put back as it was at `base`. Tests that pass there don't check the change. None when the change holds
+    no Python tests or no Python code, or there's no base to compare with."""
+    tests = sorted(f for f in changes_ if is_test(f) and f.endswith(".py"))
+    code = sorted(f for f in changes_ if not is_test(f) and f.endswith(".py"))
+    if not tests or not code or not base:
+        return None
+    with tempfile.TemporaryDirectory(prefix="hm-before-") as tmp:
+        copy_tree(root, tmp)
+        existed = set(git(root, "ls-tree", "-r", "--name-only", base, "--", *code).splitlines())
+        for f in code:
+            if f in existed:
+                (Path(tmp) / f).write_text(git(root, "show", f"{base}:{f}"), encoding="utf-8")
+            else:
+                (Path(tmp) / f).unlink(missing_ok=True)
+        r = run_tests(tmp, cmd, timeout=timeout, copy=True)
+    return {"changed_tests": tests, "code_put_back": code,
+            "on_code_before_change": "pass" if r["passed"] else "fail", "tail": r["tail"][-3:]}
 
-    A surviving mutant (tests still pass on broken code) means the tests do not check that code.
-    """
-    results = []
+
+def plan_mutants(root, changes_, max_mutants=4):
+    """(path, lineno, original line, mutated line) for up to `max_mutants` changed, non-test source lines."""
+    plan = []
     for path, c in changes_.items():
         if is_test(path) or not path.endswith(".py"):
             continue
-        p = Path(root) / path
-        original = p.read_text(encoding="utf-8")
-        lines = original.splitlines(keepends=True)
+        lines = (Path(root) / path).read_text(encoding="utf-8").splitlines(keepends=True)
         for lineno, text in c["added"]:
-            if len(results) >= max_mutants:
-                break
+            if len(plan) >= max_mutants:
+                return plan
             if SKIP.match(text) or lineno < 1 or lineno > len(lines):
                 continue
             for pat, rep in MUTATORS:
                 mutated = re.sub(pat, rep, lines[lineno - 1], count=1)
                 if mutated != lines[lineno - 1]:
+                    plan.append((path, lineno, text, mutated))
                     break
-            else:
-                continue
+    return plan
+
+
+def sabotage(root, changes_, cmd, max_mutants=4):
+    """Break changed source lines one at a time and rerun the tests.
+
+    A surviving mutant (tests still pass on broken code) means the tests do not check that code.
+    The mutants run in a scratch copy of the repository, so the working tree is never touched: a
+    parallel subagent can't read a mutated file or lose an edit to the restore, the IDE never shows a
+    file flicker, and a hook killed mid-run can't leave a mutant behind. If the unmutated copy fails its
+    tests (a file the tests need is ignored by git, say), the mutants run in place, as before v4.2.
+    """
+    plan = plan_mutants(root, changes_, max_mutants)
+    if not plan:
+        return {"mutants": 0, "killed": 0, "survived": []}
+    results = []
+    with tempfile.TemporaryDirectory(prefix="hm-sabotage-", ignore_cleanup_errors=True) as tmp:
+        copy_tree(root, tmp)
+        in_copy = run_tests(tmp, cmd, timeout=60, copy=True)["passed"]
+        where = tmp if in_copy else root
+        for path, lineno, text, mutated in plan:
+            p = Path(where) / path
+            original = p.read_text(encoding="utf-8")
+            lines = original.splitlines(keepends=True)
             try:
                 p.write_text("".join(lines[:lineno - 1] + [mutated] + lines[lineno:]), encoding="utf-8")
-                killed = not run_tests(root, cmd, timeout=60)["passed"]
+                killed = not run_tests(where, cmd, timeout=60, copy=in_copy)["passed"]
             finally:
                 p.write_text(original, encoding="utf-8")
             results.append({"file": path, "line": lineno, "from": text.strip(),

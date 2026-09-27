@@ -1,6 +1,8 @@
 """Replay a scripted Bob session through the real hooks and the real MCP server (real Jev calls).
 
-Usage: python simulate.py [--out demo/run]
+Usage: python simulate.py [--out demo/run] [--deep-review]
+
+--deep-review turns on deep review (hallmonitor/review.py), which is off by default and in the demo.
 
 MCP calls go through an actual stdio JSON-RPC session with hm_mcp.py, exactly as Bob would make them.
 """
@@ -17,13 +19,38 @@ from pathlib import Path
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
 from demo import scenario  # noqa: E402
-from hallmonitor import hook  # noqa: E402
+from hallmonitor import hook, jev  # noqa: E402
 from hallmonitor.store import Store  # noqa: E402
+
+def clean(text):
+    """Printed output never carries this machine's absolute paths (they contain the local user name)."""
+    for root in {str(HERE.resolve()), str(HERE)}:
+        text = text.replace(root.replace("\\", "\\\\"), "hall-monitor").replace(root, "hall-monitor")
+    return text
+
 
 LABEL = {"allow": "ALLOW", "rebrief": "REBRIEF", "block": "BLOCK", "ask_human": "ASK", "send_back": "SENDBACK",
          "accept": "VERIFIED", "audit": "AUDIT", "brief": "BRIEF", "new_task": "BRIEF", "follow_up": "BRIEF",
          "approved": "APPROVED", "approved_with_note": "NOTED", "rejected": "REJECTED", "record": "RECORDED",
-         "reject": "REJECTED", "flag": "FLAGGED", "ok": "OK"}
+         "reject": "REJECTED", "flag": "FLAGGED", "ok": "OK", "needs_evidence": "EVIDENCE?", "stuck": "STUCK"}
+
+
+def cite(claims, store):
+    """Resolve the scenario's symbolic citations against the real evidence ledger, as Bob would after
+    calling list_evidence: "@test" is the newest test run, "@edit:<path>" the newest edit of that file."""
+    rows = store.evidence()
+
+    def newest(pred):
+        ids = [r["id"] for r in rows if pred(r)]
+        return ids[-1] if ids else "E0"
+
+    def one(ref):
+        if ref == "@test":
+            return newest(lambda r: r["kind"] == "test")
+        if ref.startswith("@edit:"):
+            return newest(lambda r: r["kind"] == "edit" and r.get("file") == ref[6:])
+        return ref
+    return [{**c, "evidence": [one(x) for x in c["evidence"]]} if isinstance(c, dict) else c for c in claims]
 
 
 class MCP:
@@ -54,14 +81,15 @@ class MCP:
         self.p.wait(timeout=10)
 
 
-def setup(dest):
+def setup(dest, deep_review=False):
     if dest.exists():
         shutil.rmtree(dest, onerror=lambda f, p, e: (Path(p).chmod(0o700), f(p)))
     shutil.copytree(HERE / "demo" / "template", dest)
     g = ["git", "-c", "user.name=demo", "-c", "user.email=demo@example.com", "-c", "core.autocrlf=false"]
     for args in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "initial"]):
         subprocess.run(g + args, cwd=dest, check=True)
-    Store(dest).dir.joinpath("config.json").write_text(json.dumps({"max_mutants": 6}))
+    config = {"max_mutants": 6, **({"deep_review": True} if deep_review else {})}
+    Store(dest).dir.joinpath("config.json").write_text(json.dumps(config))
 
 
 def apply(step, dest):
@@ -90,8 +118,10 @@ def main():
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(HERE / "demo" / "run"))
-    dest = Path(ap.parse_args().out).resolve()
-    setup(dest)
+    ap.add_argument("--deep-review", action="store_true", help="turn on deep review (off in the demo)")
+    args = ap.parse_args()
+    dest = Path(args.out).resolve()
+    setup(dest, args.deep_review)
     store = Store(dest)
     mcp = MCP(dest)
     print(f"MCP server up; tools: {', '.join(mcp.tools)}\n")
@@ -100,17 +130,24 @@ def main():
         n_before = len(store.events())
         after = None
         if "mcp" in s:
+            if s["mcp"] == "submit_claims":
+                s = {**s, "args": {**s["args"], "claims": cite(s["args"]["claims"], store)}}
             text = mcp.call(s["mcp"], s["args"])
             if s["mcp"] == "submit_claims" and "AUDIT NEEDED" in text:
                 ev = store.events()[-1]
                 idx = [int(m) for m in re.findall(r"AUDIT NEEDED for claim (\d+)", text)]
                 print(f"{i:>2}. {'AUDIT':9} {s['label']:<46} -> Bob spawns an explore subagent (claims {idx})")
                 for line in text.splitlines()[:8]:
-                    print(f"      | {line}")
+                    print(clean(f"      | {line}"))
                 rows = json.loads((store.dir / "receipts.json").read_text(encoding="utf-8"))["rows"]
                 notes = {str(k): scenario.audit_for(rows[k]["claim"]) for k in idx}
                 text = mcp.call("submit_claims", {**s["args"], "audit_notes": notes})
                 s = {**s, "label": "  resubmitted with the subagent's audit"}
+            if s["mcp"] == "submit_claims" and "REVIEW NEEDED" in text:  # only with --deep-review
+                files = re.findall(r"^REVIEW NEEDED for (\S+):$", text, re.M)
+                print(f"{i:>2}. {'REVIEW':9} {s['label']:<46} -> Bob spawns explore subagents ({', '.join(files)})")
+                text = mcp.call("submit_claims", {**s["args"], "review_notes": {f: scenario.review_for(f) for f in files}})
+                s = {**s, "label": "  resubmitted with the subagents' reviews"}
             ev = (store.events()[n_before:] or [{}])[-1]
             action = ev.get("verdict") or ev.get("action") or "ok"
             code = 0
@@ -135,10 +172,12 @@ def main():
                 if ret.get("stage") == "subagent_return":
                     after = f"{i:>2}. {LABEL.get(ret['action'], ret['action']):9} {'  …it returns its summary':<46} {summarize(ret)}"
         print(f"{i:>2}. {LABEL.get(action, action):9} {s['label']:<46} {summarize(ev)}")
-        show = lines if (code == 2 or action in ("rejected", "send_back", "reject", "audit", "approved_with_note")
-                         or s.get("mcp") == "explain_block") else lines[:1]
+        show = lines if (code == 2 or action in ("rejected", "send_back", "reject", "audit", "approved_with_note",
+                                                 "needs_evidence", "stuck", "ask_human")
+                         or s.get("mcp") in ("explain_block", "list_evidence")
+                         or (lines and lines[0].startswith("Hall Monitor notes"))) else lines[:1]
         for line in show[:12]:
-            print(f"      | {line}")
+            print(clean(f"      | {line}"))
         if after:
             print(after)
     mcp.close()
@@ -147,8 +186,11 @@ def main():
     tok = sum(e.get("tokens", 0) for e in events)
     for e in [e for e in events if e.get("stage") == "error"]:
         print("ERROR:", e["error"], "\n", e["trace"])
-    print(f"\n{len(events)} logged events, {tok:,} Jev tokens, {time.time() - t0:.0f}s "
-          f"(~${tok * 0.042 / 1e6:.4f})\nHall Pass: {store.dir / 'hall-pass.html'}")
+    receipts = store.evidence()
+    print(f"\n{len(events)} logged events, {len(receipts)} receipts "
+          f"({sum(1 for r in receipts if r['kind'] == 'checkpoint')} checkpoints), {tok:,} Jev input tokens "
+          f"({jev.MODEL}), {time.time() - t0:.0f}s, ${jev.cost(tok):.4f}\n"
+          f"Hall Pass: {(store.dir / 'hall-pass.html').relative_to(HERE.resolve()).as_posix()}")
 
 
 if __name__ == "__main__":

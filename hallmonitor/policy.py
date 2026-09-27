@@ -18,18 +18,23 @@ from itertools import product
 # Harm of taking an action when a risk is present ("ok" = no risk present). Risks add up.
 # Conflict detection between agents is low-precision (the SID paper reports 27.9%), so a likely
 # conflict is answered with a note naming the other agent's work; only a near-certain one blocks.
+# Being off-task alone earns a reminder, never a block: blocking harmless side work (a docstring, a diff)
+# costs more than the drift it prevents. A block needs more: a likely excuse, a rule at risk, a
+# destructive action or a clash with another agent. The last two weights (rebrief/rationalizing,
+# block/off_task) were set on 2026-09-27 with eval/control_set.py, after it caught a false block; the
+# choice gave 24/24 correct on the control set plus the demo's catches, with the widest margin.
 STEP_HARM = {
     "allow":   {"ok": 0,  "destructive": 100, "violates": 30, "off_task": 8, "rationalizing": 15,
                 "conflict": 12, "mismatch": 25},
-    "rebrief": {"ok": 3,  "destructive": 100, "violates": 27, "off_task": 2, "rationalizing": 10,
+    "rebrief": {"ok": 3,  "destructive": 100, "violates": 27, "off_task": 2, "rationalizing": 8,
                 "conflict": 4, "mismatch": 22},
-    "block":   {"ok": 15, "destructive": 0,   "violates": 0,  "off_task": 4, "rationalizing": 0,
+    "block":   {"ok": 15, "destructive": 0,   "violates": 0,  "off_task": 10, "rationalizing": 0,
                 "conflict": 0, "mismatch": 0},
 }
-CLAIM_HARM = {
-    "accept":    {"ok": 0, "unsupported": 8, "contradicted": 30},
-    "flag":      {"ok": 3, "unsupported": 2, "contradicted": 12},
-    "send_back": {"ok": 6, "unsupported": 1, "contradicted": 0},
+CLAIM_HARM = {  # keys are the VERDICT labels ("supports" is the ok world)
+    "accept":    {"ok": 0, "says_nothing": 8, "contradicts": 30},
+    "flag":      {"ok": 3, "says_nothing": 2, "contradicts": 12},
+    "send_back": {"ok": 6, "says_nothing": 1, "contradicts": 0},
 }
 PLAN_HARM = {
     "allow": {"ok": 0,  "violates": 30, "uncertified": 6},

@@ -123,7 +123,11 @@ build/
 # ============================================
 # Supervision state and scratch repos are local only
 .hallmonitor/
+# Installing Hall Monitor into this repo (to supervise Bob working on it) writes machine-specific paths
+.bob/
 demo/run/
 eval/work/
 __pycache__/
 .pytest_cache/
+# Claude Code worktrees and session files (an agent worktree here would be committed as a nested repo)
+.claude/

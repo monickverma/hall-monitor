@@ -29,7 +29,7 @@ def test_uncertain_violation_escalates():
 
 
 def test_claim_policy():
-    worlds, reveal = policy.exclusive({"verified": 0.95, "unsupported": 0.04, "contradicted": 0.01}, "verified")
+    worlds, reveal = policy.exclusive({"supports": 0.95, "says_nothing": 0.04, "contradicts": 0.01}, "supports")
     assert policy.decide(worlds, reveal, policy.CLAIM_HARM).action == "accept"
-    worlds, reveal = policy.exclusive({"verified": 0.1, "unsupported": 0.2, "contradicted": 0.7}, "verified")
+    worlds, reveal = policy.exclusive({"supports": 0.1, "says_nothing": 0.2, "contradicts": 0.7}, "supports")
     assert policy.decide(worlds, reveal, policy.CLAIM_HARM).action == "send_back"

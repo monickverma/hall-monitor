@@ -15,11 +15,27 @@ from hallmonitor import bob, report  # noqa: E402
 from hallmonitor.store import Store  # noqa: E402
 
 
+def bob_failure(data):
+    """Why `bob run` gave no result, in words an operator can act on; None when it ran."""
+    if data.get("status") != "unparsed" or not data.get("exit_code"):
+        return None
+    err = data.get("error") or "no output"
+    hint = ""
+    if "license" in err.lower():
+        hint = " Run `bob` once interactively to read and accept IBM's license, or set HM_BOB_ACCEPT_LICENSE=1."
+    elif "api key" in err.lower():
+        hint = " Create a key at bob.ibm.com (Admin, API Keys) and set BOB_API_KEY; a 'general' key also needs HM_BOB_TEAM_ID."
+    return f"Bob Shell exited {data['exit_code']} before the task ran: {err}{hint}"
+
+
 def main(repo, task):
     sys.stdout.reconfigure(encoding="utf-8")
     data = bob.run_supervised(repo, task)
     if data is None:
         sys.exit("Bob Shell (`bob`) is not installed or not on PATH.")
+    failure = bob_failure(data)
+    if failure:
+        print(failure, file=sys.stderr)
     store = Store(repo)
     path, summary = report.write_hall_pass(store)
     receipts = [e for e in store.events() if e.get("stage") == "receipts"]

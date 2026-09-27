@@ -11,15 +11,32 @@ import sys
 import traceback
 from pathlib import Path
 
-from . import brief, payload as P, receipts, step
-from .store import Store
+from . import brief, jev, lessons, payload as P, receipts, step
+from .store import Store, rel_path
+
+# When Jev refuses a request (HTTP 403), every hook falls back here instead of the generic error path,
+# so a refusal is never silently waved through by fail_open.
+REFUSED = {
+    "PreToolUse": (2, "", "Hall Monitor couldn't check this action; ask the user."),
+    "UserPromptSubmit": (0, "[Hall Monitor] Couldn't check this prompt, so no decisions were recorded from it. "
+                            "If it states a rule, ask the user to confirm it and record it with record_decision.", ""),
+    "SessionStart": (0, "[Hall Monitor] Couldn't read the rules in AGENTS.md at session start. Ask the user "
+                        "which rules apply, and record them with record_decision.", ""),
+}
+
+def stop(p, store):
+    """The backstop for unsubmitted work, then this session's lessons for the next one (lessons.py)."""
+    result = receipts.stop_hook(store, P.assistant_text(p))
+    lessons.save(store)
+    return result
+
 
 HANDLERS = {
     "SessionStart": brief.session_start,
     "UserPromptSubmit": brief.user_prompt,
     "PreToolUse": step.pre_tool,
     "PostToolUse": step.post_tool,
-    "Stop": lambda p, s: receipts.stop_hook(s, P.assistant_text(p)),
+    "Stop": stop,
 }
 
 
@@ -34,13 +51,25 @@ def handle(payload):
     if handler is None:
         return 0, "", ""
     try:
-        code, out, err = handler(payload, store)
+        try:
+            code, out, err = handler(payload, store)
+        except jev.JevRefused:
+            store.log({"stage": "error", "event": P.event(payload), "fallback": "jev_refused",
+                       "error": "Jev refused the request"})
+            if P.event(payload) == "Stop":
+                store.queue_note("Hall Monitor couldn't check the final claims. Ask the user to review them.")
+                from . import report
+                report.write_hall_pass(store)
+            code, out, err = REFUSED.get(P.event(payload), (0, "", ""))
         if code == 2 and err:
             path, command, _ = P.describe(P.tool(payload), P.tool_input(payload))
-            target = path or command or P.tool(payload)
+            # repo-relative, like everywhere else: Bob's edit tools send absolute paths
+            target = rel_path(store.root, path, base=P.first(payload, "cwd")) if path else command or P.tool(payload)
             store.record_block(P.tool(payload), target, err)
-            store.queue_note(f"Blocked {P.tool(payload)} on {target}: " + err.splitlines()[0][:200] +
-                             " (call explain_block for the full reason)")
+            lines = err.splitlines()
+            reason = next((l[2:] for l in lines if l.startswith("- ")), lines[0])
+            store.queue_note(f"Blocked {P.tool(payload)} on {target}: {reason[:200]} "
+                             "(call explain_block for the full reason)")
         return code, out, err
     except Exception as e:  # supervision must never brick the agent unless configured to
         store.log({"stage": "error", "event": P.event(payload), "error": repr(e),

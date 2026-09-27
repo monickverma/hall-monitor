@@ -81,6 +81,25 @@ def main(repo):
     else:
         print("\n6. No hall-monitor MCP calls logged (was the MCP server connected?)")
 
+    # v4.1 checks
+    post_cmd = [r["payload"] for r in rows if field(r["payload"], "event", "hook_event_name") == "PostToolUse"
+                and field(r["payload"], "tool", "tool_name") in ("execute_command", "run_command", "shell")]
+    print("\n7. PostToolUse on commands:", len(post_cmd))
+    for p in post_cmd[:1]:
+        out = field(p, "tool_response", "tool_output", "output", "result")
+        nested = out if isinstance(out, dict) else {}
+        code = field(p, "exit_code", "exitCode", "returncode") or field(nested, "exit_code", "exitCode", "returncode")
+        print(f"   carries output: {out is not None} (receipts need it)   exit code: {code!r} "
+              f"({'receipts use it' if code is not None else 'none: pass/fail is inferred from the output'})")
+    kinds = sorted({t for c in calls if c.get("tool") == "submit_claims" for t in (c.get("claim_types") or [])})
+    print("\n8. submit_claims item types Bob sent:", kinds or "none (ask Bob to submit a claim with evidence IDs)",
+          "-> evidence-carrying claims work" if "dict" in kinds else "")
+    import subprocess
+    refs = subprocess.run(["git", "for-each-ref", "refs/hallmonitor"], cwd=repo, capture_output=True, text=True).stdout
+    print("\n9. Checkpoint refs:", len(refs.splitlines()),
+          "-> now use Bob's rollback once and confirm it still works" if refs else
+          "(none yet: run a passing test in Bob, or create one by hand as PROBE.md step 8 says)")
+
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:

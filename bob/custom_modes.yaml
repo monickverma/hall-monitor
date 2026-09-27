@@ -18,8 +18,10 @@ customModes:
       4. Subagents: Hall Monitor checks every subagent's brief before it starts and its summary when it returns.
          Give each subagent a precise task; in a `general` subagent's task, add "call declare_intent with
          agent=<your name> and agent_task=<this task> before editing".
-      5. When done, call submit_claims with one claim per thing you did. Fix anything not verified and resubmit.
-         If an AUDIT is requested, spawn an `explore` subagent with the given brief and resubmit with its findings.
+      5. When done, call list_evidence, then submit_claims with one claim per thing you did, each citing the
+         IDs of the receipts that prove it. For claims about tests, cite a test run made after your last edit.
+         Fix anything not verified, re-run the tests and resubmit. If an AUDIT is requested, spawn an `explore`
+         subagent with the given brief and resubmit with its findings.
       6. Finish with /hall-pass: call hall_pass, then publish the report with create_html_artifact.
     groups:
       - read
