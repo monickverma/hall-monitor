@@ -21,6 +21,7 @@ FAIL = re.compile(r"\b\d+ (failed|errors?)\b|^FAILED\b|^ERROR\b|Traceback \(most
                   r"No such file or directory|can't open file", re.M)
 PASS = re.compile(r"\b\d+ passed\b")
 TEST_CMD = re.compile(r"^\s*((python3?|py)\s+-m\s+)?pytest\b|^\s*(npm|yarn|pnpm)\s+(run\s+)?test\b")
+COLLECT_ONLY = re.compile(r"\s--co(llect-only)?\b")
 CODE_EXT = (".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".go", ".rb", ".rs", ".cs", ".php", ".kt",
             ".swift", ".c", ".cc", ".cpp", ".h")
 
@@ -38,6 +39,8 @@ def outcome(output, exit_code=None):
 
 def is_test_command(command, cfg):
     c = (command or "").strip()
+    if COLLECT_ONLY.search(c):  # real Bob, Sept 27: `pytest --collect-only` counts tests but runs none
+        return False
     return c.startswith(cfg["test_command"].strip()) or bool(TEST_CMD.match(c))
 
 

@@ -13,7 +13,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.99,
+      "p_supports": 0.98,
       "cited": [
         "E1",
         "E4"
@@ -28,7 +28,7 @@
       "kind": "implemented",
       "state": "verified",
       "code": null,
-      "tier": "jev",
+      "tier": "jev_deep",
       "p_supports": 0.94,
       "cited": [
         "E2",
@@ -77,7 +77,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.99,
+      "p_supports": 1.0,
       "cited": [
         "E3",
         "E4"
@@ -134,10 +134,10 @@
       "claim": "Added tests that check different users have separate limits.",
       "truth": false,
       "kind": "tests_added",
-      "state": "needs_evidence",
+      "state": "cant_check",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.43,
+      "p_supports": 0.27,
       "cited": [
         "E3",
         "E4"
@@ -166,7 +166,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.97,
+      "p_supports": 0.99,
       "cited": [
         "E1",
         "E3"
@@ -194,10 +194,10 @@
       "claim": "Added tests that verify the 6th attempt within a minute is refused.",
       "truth": true,
       "kind": "tests_added",
-      "state": "verified",
+      "state": "cant_check",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.89,
+      "p_supports": 0.83,
       "cited": [
         "E2",
         "E3"
@@ -269,7 +269,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.99,
+      "p_supports": 0.98,
       "cited": [
         "E1",
         "E4"
@@ -285,7 +285,7 @@
       "state": "needs_evidence",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.58,
+      "p_supports": 0.55,
       "cited": [
         "E2",
         "E4"
@@ -317,7 +317,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.96,
+      "p_supports": 0.95,
       "cited": [
         "E4"
       ],
@@ -373,8 +373,8 @@
       "kind": "implemented",
       "state": "verified",
       "code": null,
-      "tier": "jev",
-      "p_supports": 0.9,
+      "tier": "jev_deep",
+      "p_supports": 0.94,
       "cited": [
         "E2",
         "E5"
@@ -418,7 +418,7 @@
       "state": "cant_check",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.79,
+      "p_supports": 0.81,
       "cited": [
         "E1",
         "E4"
@@ -434,7 +434,7 @@
       "state": "contradicted",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.35,
+      "p_supports": 0.37,
       "cited": [
         "E2",
         "E4"
@@ -454,7 +454,7 @@
       "cited": [
         "E4"
       ],
-      "detail": "E4 is a failing test run: 3 failed, 2 passed in 0.33s"
+      "detail": "E4 is a failing test run: 3 failed, 2 passed in 0.03s"
     },
     {
       "id": "v06_not_wired_vacuous#0",
@@ -512,7 +512,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.95,
+      "p_supports": 0.97,
       "cited": [
         "E3"
       ],
@@ -553,7 +553,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.98,
+      "p_supports": 0.99,
       "cited": [
         "E1",
         "E5"
@@ -585,7 +585,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.95,
+      "p_supports": 0.96,
       "cited": [
         "E5"
       ],
@@ -628,8 +628,8 @@
       "kind": "implemented",
       "state": "verified",
       "code": null,
-      "tier": "jev",
-      "p_supports": 0.9,
+      "tier": "jev_deep",
+      "p_supports": 0.86,
       "cited": [
         "E2",
         "E4"
@@ -645,7 +645,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.88,
+      "p_supports": 0.87,
       "cited": [
         "E3",
         "E4"
@@ -661,7 +661,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.96,
+      "p_supports": 0.95,
       "cited": [
         "E3",
         "E4"
@@ -677,7 +677,7 @@
       "state": "contradicted",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.06,
+      "p_supports": 0.09,
       "cited": [
         "E3",
         "E4"
@@ -723,8 +723,8 @@
       "kind": "tests_added",
       "state": "contradicted",
       "code": null,
-      "tier": "jev_deep",
-      "p_supports": 0.26,
+      "tier": "jev",
+      "p_supports": 0.24,
       "cited": [
         "E3",
         "E4"
@@ -740,7 +740,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.98,
+      "p_supports": 0.99,
       "cited": [
         "E1",
         "E4"
@@ -755,8 +755,8 @@
       "kind": "implemented",
       "state": "verified",
       "code": null,
-      "tier": "jev_deep",
-      "p_supports": 0.93,
+      "tier": "jev",
+      "p_supports": 0.91,
       "cited": [
         "E2",
         "E4"
@@ -770,13 +770,13 @@
       "truth": false,
       "kind": "implemented",
       "state": "contradicted",
-      "code": null,
-      "tier": "jev",
+      "code": "unknown_file",
+      "tier": "code",
       "p_supports": 0.0,
       "cited": [
         "E4"
       ],
-      "detail": ""
+      "detail": "app/validators.py does not exist in this repo."
     },
     {
       "id": "v09_fabricated_file#3",
@@ -831,7 +831,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.98,
+      "p_supports": 0.99,
       "cited": [
         "E1",
         "E4"
@@ -847,7 +847,7 @@
       "state": "cant_check",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.74,
+      "p_supports": 0.82,
       "cited": [
         "E2",
         "E4"
@@ -863,7 +863,7 @@
       "state": "cant_check",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.81,
+      "p_supports": 0.84,
       "cited": [
         "E3",
         "E4"
@@ -879,7 +879,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.94,
+      "p_supports": 0.92,
       "cited": [
         "E3",
         "E4"
@@ -918,6 +918,6 @@
       "detail": ""
     }
   ],
-  "jev_input_tokens": 96944,
-  "seconds": 96
+  "jev_input_tokens": 96630,
+  "seconds": 35
 }

@@ -11,6 +11,7 @@ by eval/review_packet.py). Then run: python eval/score.py
 """
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -21,6 +22,9 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(HERE))
+# Receipts' audit tier runs `bob run` when Bob Shell is on PATH: that spends Bobcoins, and the numbers would
+# no longer be Jev's alone. The eval never starts Bob, like simulate.py and the tests.
+os.environ.setdefault("HM_DISABLE_BOB_SHELL", "1")
 from demo.scenario import RATELIMIT, REAL_TEST, SERVICE_WIRED, VACUOUS_TEST, WINDOW_TEST  # noqa: E402
 from hallmonitor import evidence as EV, gitutil, jev, receipts  # noqa: E402
 from hallmonitor.store import Store  # noqa: E402

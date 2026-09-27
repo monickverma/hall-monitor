@@ -33,6 +33,7 @@ import time
 from . import fabricated as FB, mutation  # v4.2 fabricated files, extreme mutation
 
 from . import bob, brief, evidence as EV, gitutil, jev, policy, questions as Q
+from .store import is_protected
 
 # Evidence for claims judged without citations (after the free retry, and Hall Monitor's own
 # obligation claims), per claim kind (less noise, fewer tokens).
@@ -55,10 +56,41 @@ FILE_RE = re.compile(r"[A-Za-z0-9_][\w./-]*\.[A-Za-z]{1,5}\b")
 CITE_RE = re.compile(r"\bE\d+\b")
 
 
+HEADER_TAG = "from the header:"
+HEADER_TAG_RE = re.compile(r" \[from the header: [^\]]*\]$")
+BULLET_RE = re.compile(r"^([-*\u2022]|\d+[.)])\s+")
+MD_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+
+
+def _under_headers(text):
+    """Free text with each list item tagged with the files and receipt IDs of the header it sits under.
+    Real Bob, Sept 27: Bob grouped its claims under lines like "**[`README.md`](README.md)** — E1:". Each
+    header was judged as a claim of its own, and the items below it came back uncited, or contradicted
+    for naming only the files they point to. A line ending in ":" that introduces a list is not a claim."""
+    lines = [x.strip() for x in (text or "").splitlines()]
+    body = [x for x in lines if x]
+    out, tag = [], ""
+    for k, line in enumerate(body):
+        nxt = body[k + 1] if k + 1 < len(body) else ""
+        if line.startswith("#") or line.endswith(":"):  # headings and introductions are never claims
+            tag = ""
+            if line.endswith(":") and (BULLET_RE.match(nxt) or nxt.endswith(":")):
+                plain = re.sub(r"[*`]+", "", MD_LINK_RE.sub(r"\1", line))
+                refs = list(dict.fromkeys(FILE_RE.findall(plain) + CITE_RE.findall(plain)))
+                tag = f" [{HEADER_TAG} {' '.join(refs)}]" if refs else ""
+            continue
+        if BULLET_RE.match(line):
+            line = BULLET_RE.sub("", line) + tag
+        else:
+            tag = ""
+        out.append(line)
+    return "\n".join(out)
+
+
 def parse(claims_or_summary):
     """[(text, cited IDs)] from certificate objects {claim, evidence}, plain strings, or free text.
     Inline citations such as "[E12]" count, so a CLAIMS.md file can cite receipts too."""
-    items = brief.sentences(claims_or_summary, limit=20) if isinstance(claims_or_summary, str) \
+    items = brief.sentences(_under_headers(claims_or_summary), limit=20) if isinstance(claims_or_summary, str) \
         else list(claims_or_summary or [])
     out = []
     for c in items:
@@ -131,15 +163,65 @@ def next_round(send_backs, status, limit):
     return send_backs, status
 
 
-def _relevant_diff(changes, claim, budget=2500):
-    """Put files the claim mentions first, so the evidence the claim is about survives truncation."""
+# How much diff Jev sees per claim. Real Bob, Sept 27: at 2,500 characters (and 60 lines per file in
+# gitutil.diff_text) true claims about a long doc edit came back "says nothing", and the docs task ended
+# STUCK. When a diff is still too long, _relevant_diff shows the lines the claim is about. The seeded eval
+# never cuts a diff (its largest is 1,816 characters), so tests/test_evidence.py pins this with a long
+# edit. A deep look at 12,000 gave 3 "can't check" verdicts.
+FOCUSED_DIFF_BUDGET = 6000
+DEEP_DIFF_BUDGET = 7000
+
+
+WORD_RE = re.compile(r"[a-z_][a-z0-9_]{3,}")
+STOPWORDS = {"that", "this", "with", "from", "into", "each", "every", "when", "then", "than", "have", "been",
+             "were", "which", "there", "their", "they", "them", "what", "also", "only", "more", "must", "does",
+             "done", "made", "added", "adds", "updated", "changed", "file", "files", "line", "lines", "now",
+             "section", "sections", "should", "will", "would", "about", "after", "before", "under", "over"}
+EXCERPT_OVER = 20  # a file with more added lines than this is excerpted when the diff doesn't fit
+
+
+def _excerpt(c, words, room):
+    """A long file edit cut down to about `room` characters: the added lines that share the most words
+    with the claim, then their neighbours, in file order; its first lines only if none share a word.
+    Each gap is marked, so a cut is never read as an absence."""
+    added = c["added"]
+    score = [len(words & set(WORD_RE.findall(t.lower()))) for _, t in added]
+    order = sorted((k for k, n in enumerate(score) if n), key=lambda k: (-score[k], k)) or list(range(len(added)))
+    keep, used = set(), 0
+    for k in order + [j for k in order for j in (k - 1, k + 1) if 0 <= j < len(added)]:
+        size = len(added[k][1]) + 2
+        if k not in keep and used + size <= room:
+            keep.add(k)
+            used += size
+    rows, prev = [], -1
+    for j in sorted(keep):
+        if j > prev + 1:
+            rows.append((None, f"[... {j - prev - 1} added lines not shown]"))
+        rows.append(added[j])
+        prev = j
+    if prev < len(added) - 1:
+        rows.append((None, f"[... {len(added) - 1 - prev} added lines not shown]"))
+    return {**c, "added": rows, "total_added": len(added)}
+
+
+def _relevant_diff(changes, claim, budget=FOCUSED_DIFF_BUDGET):
+    """Put files the claim mentions first, so the evidence the claim is about survives truncation. When
+    the diff still doesn't fit, show the lines of each long edit that the claim is about (real Bob, Sept 27:
+    a true claim about a README section 100 lines down came back "says nothing")."""
     words = set(re.findall(r"[A-Za-z_][\w./]*", claim.lower()))
 
     def mentioned(path):
         stem = path.lower().rsplit("/", 1)[-1]
         return path.lower() in words or stem in words or stem.split(".")[0] in words
     ordered = dict(sorted(changes.items(), key=lambda kv: not mentioned(kv[0])))
-    return gitutil.diff_text(ordered, budget)
+    text = gitutil.diff_text(ordered, budget)
+    if "not shown]" not in text:
+        return text
+    key = {w for w in WORD_RE.findall(HEADER_TAG_RE.sub("", claim).lower()) if w not in STOPWORDS}
+    long = [f for f, c in ordered.items() if len(c["added"]) > EXCERPT_OVER]
+    short = sum(len(gitutil.diff_text({f: c}, budget)) for f, c in ordered.items() if f not in long)
+    room = max(500, (budget - short) // max(1, len(long)) - 150)  # 150: the header and gap markers
+    return gitutil.diff_text({f: _excerpt(c, key, room) if f in long else c for f, c in ordered.items()}, budget)
 
 
 def _receipt_view(r):
@@ -197,7 +279,10 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
                    if 0 <= i < len(claims) and requested.get(str(i)) == claims[i]["claim"]}
     resubmit = bool(audit_notes)  # the same round, completed with the requested audit
 
-    all_changes = gitutil.changes(store.root, sess.get("base"))
+    # .bob/ and .hallmonitor/ are Hall Monitor's own (installed after the base commit in a demo repo), and
+    # Bob can't write them: real Bob, Sept 27, they were the only "code" in a docs task's diff.
+    all_changes = {f: c for f, c in gitutil.changes(store.root, sess.get("base")).items()
+                   if not is_protected(store.root, f)}
     docs = {cfg["claims_file"].lower()}
     changes = {f: c for f, c in all_changes.items()
                if f.lower() not in docs and not f.lower().endswith((".md", ".txt", ".rst", ".pdf"))}
@@ -208,7 +293,13 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
     free_retry = not sess["uncited_retry_used"]
 
     for c in claims:
-        c["named"] = named_files(c["claim"], known) if c["from"] == "agent" else []
+        # A header's files tell where an item is; they aren't what a claim that something stayed the
+        # same is about ("First line kept as ..." under a README.md header).
+        said = HEADER_TAG_RE.sub("", c["claim"]) if c["kind"] == "unchanged" else c["claim"]
+        c["named"] = named_files(said, known) if c["from"] == "agent" else []
+        # The diff Jev is shown. A rule's own files count too: real Bob, Sept 27, "The finished work satisfies
+        # D1: Add a section to README.md" was judged on a diff without README.md and contradicted every round.
+        c["where"] = named_files(c["claim"], known)
         cert = None if c["from"] == "ledger" else \
             certify(c["kind"], c["cited"], c["named"], all_changes, ledger, tests,
                     FB.unknown_files(store.root, sess.get("base"), c["claim"], known))  # v4.2 fabricated files
@@ -226,8 +317,10 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
 
     def verdict_job(i, deep=False):
         c = claims[i]
-        scope = {f: ch for f, ch in changes.items() if f in c["named"]} or changes
-        diff = _relevant_diff(scope, c["claim"], 7000 if deep else 2500)
+        # A claim that names a changed doc is judged on that doc's diff. Real Bob, Sept 27: docs were left
+        # out of every diff, so each claim about README.md met an empty one and came back "says nothing".
+        scope = {f: ch for f, ch in all_changes.items() if f in c["where"] and f.lower() not in docs} or changes
+        diff = _relevant_diff(scope, c["claim"], DEEP_DIFF_BUDGET if deep else FOCUSED_DIFF_BUDGET)
         if c["cited"] and not c.get("uncited_fallback"):
             ev = {"cited_receipts": [_receipt_view(ledger[x]) for x in c["cited"]],
                   "fresh_test_run": tests, "diff": diff}
