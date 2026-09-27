@@ -132,6 +132,19 @@ def recorded_decisions(claim, decisions):
     return "verified", "ledger", f"{', '.join(dict.fromkeys(ids))} are in the rule ledger."
 
 
+CONDITIONAL_RE = re.compile(r"^\s*(any\s+)?(changes?|edits?|modifications?)\s+(to|of|in)\b"
+                            r"|\b(if|when|whenever)\b.{0,80}\b(chang|edit|modif|touch)", re.I)
+
+
+def not_applicable(rule, files, changed):
+    """A rule about changes to certain files ("Changes to app/auth.py require a security review") holds when
+    none of them changed. Real Bob, Sept 27: that rule came back "needs evidence" every round of a task that
+    never touched app/auth.py, until the task was STUCK. Returns None when the rule does apply."""
+    if files and CONDITIONAL_RE.search(rule) and not any(f in changed for f in files):
+        return "verified", "not_applicable", f"{', '.join(files)} didn't change, so this rule doesn't apply."
+    return None
+
+
 def certify(kind, cited, named, changed, ledger, fresh, unknown=()):
     """The certificate check, in code. Returns None (go on to Jev) or (state, reason_code, detail).
     `unknown`: code files the claim names that exist nowhere in the repo (fabricated.unknown_files)."""
@@ -293,7 +306,7 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
     # asked to prove "Changes to app/auth.py require a security review" and spent its cost cap trying.
     if any(r.get("kind") == "edit" for r in store.evidence()):
         claims += [{"claim": f"The finished work satisfies the project rule {d['id']}: \"{d['text']}\"",
-                    "kind": "obligation", "cited": [], "from": "ledger"}
+                    "kind": "obligation", "cited": [], "from": "ledger", "rule": d["text"]}
                    for d in store.active_decisions(kind="obligation")]
     # Audit notes count only for audits Hall Monitor requested in the last round, on the same claim.
     # Anything else is ignored, so attaching notes can't be used to skip a send-back round.
@@ -326,7 +339,9 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
         # D1: Add a section to README.md" was judged on a diff without README.md and contradicted every round.
         c["where"] = named_files(c["claim"], known)
         about_rules = recorded_decisions(c["claim"], decisions) if c["from"] == "agent" else None
-        cert = None if c["from"] == "ledger" else about_rules or \
+        if c["from"] == "ledger":
+            about_rules = not_applicable(c["rule"], named_files(c["rule"], known), all_changes)
+        cert = about_rules if c["from"] == "ledger" else about_rules or \
             certify(c["kind"], c["cited"], c["named"], all_changes, ledger, tests,
                     FB.unknown_files(store.root, sess.get("base"), c["claim"], known))  # v4.2 fabricated files
         if cert and cert[1] == "uncited" and not free_retry:

@@ -100,6 +100,10 @@ def user_prompt(p, store):
     new_task = sess.get("goal") is None or answers["new_task"]["noul"] >= 0.5
     if new_task:
         sess["goal"] = text[:600]
+        # A new task starts its own Receipts rounds. Real Bob, Sept 27: a task began one send-back from STUCK
+        # because the count from the task before it (a /decisions turn) carried over.
+        sess.update({"send_backs": 0, "last_send_back": None, "uncited_retry_used": False, "pending_audits": {},
+                     "suspect_files": {}, "fresh_intent_needed": {}})
     sess["stalls"] = 0  # the user has stepped in: the stall counter starts again
     added = []
     for i, s in enumerate(sents):

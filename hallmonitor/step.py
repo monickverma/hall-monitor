@@ -129,7 +129,7 @@ def declare_intent(store, intent, files=(), commands=(), agent="main", agent_tas
     t0 = time.time()
     cfg, sess = store.config(), store.session()
     files = [rel_path(store.root, f) for f in files or []]
-    commands = list(commands or [])
+    commands = [evidence.repo_command(store.root, c) for c in commands or []]
     target = ", ".join(files + commands)
     base = {"agent": agent, "agent_task": agent_task, "intent": intent, "files": files, "commands": commands}
 
@@ -197,6 +197,7 @@ def pre_tool(p, store):
     cfg, sess = store.config(), store.session()
     tool = P.tool(p)
     path, command, detail_text = P.describe(tool, P.tool_input(p))
+    command = evidence.repo_command(store.root, command)
     rel = rel_path(store.root, path, base=P.first(p, "cwd")) if path else None
 
     if tool in P.SPAWN_TOOLS:
