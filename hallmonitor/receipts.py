@@ -132,6 +132,7 @@ def recorded_decisions(claim, decisions):
     return "verified", "ledger", f"{', '.join(dict.fromkeys(ids))} are in the rule ledger."
 
 
+FAILS_WITHOUT_RE = re.compile(r"\btests?\b.{0,60}\bfails?\b.{0,30}\bwithout\b.{0,20}\bchange", re.I)
 CONDITIONAL_RE = re.compile(r"^\s*(any\s+)?(changes?|edits?|modifications?)\s+(to|of|in)\b"
                             r"|\b(if|when|whenever)\b.{0,80}\b(chang|edit|modif|touch)", re.I)
 
@@ -282,7 +283,7 @@ KIND_RULES = [
 ]
 
 
-def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
+def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main"):
     t0 = time.time()
     cfg, sess = store.config(), store.session()
     parsed = parse(claims_or_summary)
@@ -304,7 +305,10 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
     # Obligations from the ledger are implicit claims: the finished work must satisfy them. With no edit in
     # the evidence ledger there is no work for them to apply to: real Bob, Sept 27, a /decisions turn was
     # asked to prove "Changes to app/auth.py require a security review" and spent its cost cap trying.
-    if any(r.get("kind") == "edit" for r in store.evidence()):
+    # A subagent's submission covers its part: the project's rules are about the finished work, so they're
+    # checked on the main agent's. Real Bob, Sept 27: a tidy-up subagent's three submissions were held to every
+    # rule and used up the task's send-backs before the main agent submitted.
+    if agent == "main" and any(r.get("kind") == "edit" for r in store.evidence()):
         claims += [{"claim": f"The finished work satisfies the project rule {d['id']}: \"{d['text']}\"",
                     "kind": "obligation", "cited": [], "from": "ledger", "rule": d["text"]}
                    for d in store.active_decisions(kind="obligation")]
@@ -359,6 +363,13 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
         before = gitutil.fail_before(store.root, sess.get("base"), changes, cfg["test_command"])
         if before:
             sab = {**sab, "tests_on_code_before_change": before}
+            # A rule that tests must fail without the change is exactly this check, so code decides it.
+            for i in [i for i in to_judge if FAILS_WITHOUT_RE.search(claims[i].get("rule") or "")]:
+                ok = before["on_code_before_change"] == "fail"
+                claims[i]["cert"] = ("verified" if ok else "contradicted", "fail_before",
+                                     f"The changed tests {'fail' if ok else 'pass'} on the code before the change "
+                                     f"({', '.join(before['changed_tests'])}).")
+            to_judge = [i for i in to_judge if claims[i]["cert"] is None]
 
     def verdict_job(i, deep=False):
         c = claims[i]
@@ -462,11 +473,14 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
     sess = store.session()
     if free:
         sess["uncited_retry_used"] = True
+    # Each subagent has its own send-back count; the task's (main's) count is sess["send_backs"].
+    counts = sess.setdefault("agent_send_backs", {})
+    count = sess["send_backs"] if agent == "main" else counts.get(agent, 0)
     if resubmit:  # finishing the same round with an audit is not a new send-back
         if status == "accept":
-            sess["send_backs"], sess["last_send_back"] = 0, None
+            count, sess["last_send_back"] = 0, None
     else:
-        sess["send_backs"], status = next_round(sess["send_backs"], status, cfg["max_send_backs"])
+        count, status = next_round(count, status, cfg["max_send_backs"])
         if status in ("send_back", "stuck"):
             sig = sorted(f"{r['claim'][:80]}|{r['state']}|{r['code']}" for r in bad)
             if sig == sess["last_send_back"]:
@@ -477,7 +491,11 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
             sess["last_send_back"] = None
     # The audits requested this round; only notes for these (same index, same claim) count next time.
     sess["pending_audits"] = {str(a["index"]): a["claim"] for a in audits}
-    if status == "accept":  # the Stop backstop leaves work verified up to here alone (see stop_hook)
+    if agent == "main":
+        sess["send_backs"] = count
+    else:
+        counts[agent] = count
+    if status == "accept" and agent == "main":  # the Stop backstop leaves work verified up to here alone
         sess["verified_edit_seq"] = sess["edit_seq"]
     # v4 loop L4 -> L1: the files a contradicted claim names are suspect, so the next intent or edit that
     # touches them gets the deep look straight away. A verified round clears them.

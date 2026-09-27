@@ -25,7 +25,9 @@ cannot tell you why; `explain_block` returns Hall Monitor's reason and what to d
 <Step>Parallel work: Hall Monitor checks every subagent's brief against the goal, the decisions and the
 other agents' work before it starts, and checks its summary when it returns. A drifted result is reported
 in your next declare_intent result. Give each subagent a precise task, and in a `general` subagent's task
-add: "Before editing, call declare_intent with agent=<your name> and agent_task=<this task>."</Step>
+add: "Before editing, call declare_intent with agent=<your name> and agent_task=<this task>. If you
+submit claims, call submit_claims with agent=<your name>." The project's rules are checked on your own
+(the main agent's) submission, when the whole task is done.</Step>
 <Step>Hall Monitor records every edit and command you make as a numbered receipt (E1, E2, ...). A passing
 test run also becomes a checkpoint you can go back to. If a command fails, your next `declare_intent` must
 say how you'll deal with the failure.</Step>
