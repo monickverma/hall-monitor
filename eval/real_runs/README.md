@@ -27,5 +27,6 @@ Local paths are replaced with `<workspace>`, and no key values are kept. `python
 | `2026-09-27_test-first_no-receipts` | Test first: see the test fail, then make it pass | none | 0 | 1 | 0.82 |
 | `2026-09-27_subagents_sent-back_2` | Same, $2.50 cap, run on 180cf8b: before PR #12's fixes | send_back: D2 not applicable, D5 can't check, one claim uncited, and a docstring mutant survived (the case PR #12's sabotage fix covers) | 2 | 3 | 2.51 |
 | `2026-09-27_test-first_verified` | Test first, $1.20 cap, run on 180cf8b: before PR #12's fixes, so Bob recorded the policy's rules from the PDF itself | accept, first round | 0 | 2 | 1.21 |
+| `2026-09-28_subagents_no-receipts` | Same, $2.50 cap, after #12's fixes and the same-verdict, D5 and no-behavior-change fixes | none: after 6 minutes every request to Bob's gateway failed ("fetch failed") and Bob Shell stopped with "Request Failed", before the main agent submitted. The subagents' rounds were held to each other's edits: `stale` from the other agent's later edit, `replay_mismatch` from its half-written test file | 0 | 0 | n/a (about 1.55 in Bob's log) |
 
 "Stops" counts blocks, ask-the-user and restate verdicts on intents and steps. `eval/scorecard.md` has the totals, including how many stops were later allowed on the same target.
