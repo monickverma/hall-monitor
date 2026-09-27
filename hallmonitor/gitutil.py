@@ -127,7 +127,10 @@ def copy_tree(root, dest):
         src = root / f
         if src.is_file() and not f.endswith(".pyc") and not COPY_SKIP & set(Path(f).parts):
             (dest / f).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dest / f)
+            try:
+                shutil.copy2(src, dest / f)
+            except OSError:  # a locked file: the copy's own test run shows whether it mattered
+                continue
 
 
 # Mutation operators applied to changed, non-test source lines.
@@ -180,7 +183,7 @@ def sabotage(root, changes_, cmd, max_mutants=4):
     if not plan:
         return {"mutants": 0, "killed": 0, "survived": []}
     results = []
-    with tempfile.TemporaryDirectory(prefix="hm-sabotage-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="hm-sabotage-", ignore_cleanup_errors=True) as tmp:
         copy_tree(root, tmp)
         in_copy = run_tests(tmp, cmd, timeout=60, copy=True)["passed"]
         where = tmp if in_copy else root

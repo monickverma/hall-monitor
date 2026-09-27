@@ -74,7 +74,8 @@ def after_verify(store, result, review_notes=None):
     if not files:
         return result
     t0, risk = time.time(), dict(result["risky_files"])
-    notes = {rel_path(store.root, f): str(v)[:3000] for f, v in (review_notes or {}).items() if str(v).strip()}
+    given = review_notes if isinstance(review_notes, dict) else {}
+    notes = {rel_path(store.root, f): str(v)[:3000] for f, v in given.items() if str(v).strip()}
     todo = [f for f in files if f not in notes]
     if todo:
         result = {**result, "status": "review",

@@ -150,7 +150,7 @@ def extreme(root, changes, cfg):
     if not found:
         return {**out, "extreme_note": "no changed functions to test" if limit > 0 else "off"}
     deadline = time.time() + 3 * timeout
-    with tempfile.TemporaryDirectory(prefix="hm-extreme-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="hm-extreme-", ignore_cleanup_errors=True) as tmp:
         gitutil.copy_tree(root, tmp)
         if not gitutil.run_tests(tmp, cfg["test_command"], timeout, copy=True)["passed"]:
             return {**out, "extreme_note": "not run: the tests fail in a clean copy of the repo"}

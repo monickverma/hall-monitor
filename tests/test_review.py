@@ -82,6 +82,13 @@ def test_partial_notes_keep_the_review_open_and_clean_reviews_say_so(store, monk
     assert "Deep review of app/auth.py, app/service.py, app/a.py: no defects reported." in submit(store, review_notes=notes)
 
 
+def test_malformed_review_notes_just_leave_the_review_open(store, monkeypatch):
+    turn_on(store)
+    monkeypatch.setattr(jev, "ask", fake())
+    text = submit(store, review_notes=["app/auth.py looks fine"])  # a list, not {file: findings}
+    assert "REVIEW NEEDED for app/auth.py" in text
+
+
 def test_no_review_unless_every_claim_verifies(store, monkeypatch):
     turn_on(store)
     monkeypatch.setattr(jev, "ask", fake())
