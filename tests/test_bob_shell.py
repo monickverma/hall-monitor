@@ -48,3 +48,13 @@ def test_a_failure_before_the_task_says_what_to_do(tmp_path, monkeypatch):
            "error": "Error: Bob API key is required. Set BOB_API_KEY environment variable."}
     assert "BOB_API_KEY" in headless.bob_failure(key)
     assert headless.bob_failure({"status": "success", "exit_code": 0}) is None
+
+
+def test_an_unexpanded_key_reference_counts_as_no_key(monkeypatch):
+    """Bob leaves "${env:TYPESAFE_API_KEY}" literal when the variable is unset; that is no key, and on
+    Windows the registry fallback must still get its turn."""
+    from hallmonitor import jev
+    monkeypatch.setenv("TYPESAFE_API_KEY", "${env:TYPESAFE_API_KEY}")
+    monkeypatch.setattr(jev.os, "name", "posix")
+    jev.load_key_from_user_env()
+    assert "TYPESAFE_API_KEY" not in jev.os.environ
