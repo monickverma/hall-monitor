@@ -12,7 +12,7 @@ import traceback
 from pathlib import Path
 
 from . import brief, jev, payload as P, receipts, step
-from .store import Store
+from .store import Store, rel_path
 
 # When Jev refuses a request (HTTP 403), every hook falls back here instead of the generic error path,
 # so a refusal is never silently waved through by fail_open.
@@ -56,7 +56,8 @@ def handle(payload):
             code, out, err = REFUSED.get(P.event(payload), (0, "", ""))
         if code == 2 and err:
             path, command, _ = P.describe(P.tool(payload), P.tool_input(payload))
-            target = path or command or P.tool(payload)
+            # repo-relative, like everywhere else: Bob's edit tools send absolute paths
+            target = rel_path(store.root, path, base=P.first(payload, "cwd")) if path else command or P.tool(payload)
             store.record_block(P.tool(payload), target, err)
             lines = err.splitlines()
             reason = next((l[2:] for l in lines if l.startswith("- ")), lines[0])

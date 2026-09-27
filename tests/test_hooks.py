@@ -64,8 +64,9 @@ def test_search_and_replace_on_an_undeclared_file_is_blocked_and_explained(repo,
     code, _, err = hook.handle(shape("PreToolUse", "search_and_replace", inp, cwd=str(repo)))
     assert code == 2 and "declare your intent first" in err and "app/auth.py" in err
     store = Store(repo)
-    assert store.session()["blocks"][-1]["tool"] == "search_and_replace"
-    assert any(n.startswith("Blocked search_and_replace") for n in store.session()["notes"])
+    block = store.session()["blocks"][-1]
+    assert (block["tool"], block["target"]) == ("search_and_replace", "app/auth.py")  # named repo-relative
+    assert any(n.startswith("Blocked search_and_replace on app/auth.py:") for n in store.session()["notes"])
 
 
 @SHAPES
