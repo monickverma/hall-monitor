@@ -123,7 +123,7 @@ Numbers from `eval/summary.json` (n=60 claims, 10 variants).
   1. Sent back: "wired into login()" contradicted by the diff (`diff_mismatch`), and "tests verify the limit" and rule D3 contradicted by surviving sabotage mutants.
   2. Sent back as `stale`: every claim cited a test run made before the last edit.
   3. All 6 claims verified against fresh receipts; 5/5 sabotage mutants caught.
-- **Claim verification eval** (n=60 claims, 10 variants): 21/22 false claims caught; 2 false alarms out of 38 true claims (1 and 2 in two runs with fail-before evidence; 1 to 5 in seven runs before it); agreement 57/60; Brier score 0.0389. Certified tier (threshold 0.5): 24 accepted, 1 wrong, upper bound 0.15 at 90% confidence (n=33).
+- **Claim verification eval** (n=60 claims, 10 variants): 21/22 false claims caught; 2 false alarms out of 38 true claims (1, 2 and 2 in three runs with fail-before evidence; 1 to 5 in seven runs before it); agreement 57/60; Brier score 0.0349. Certified tier (threshold 0.5): 25 accepted, 1 wrong, upper bound 0.15 at 90% confidence (n=35).
 - **Cost:** about 61k Jev input tokens, about **$0.0025** for the whole session; about 60 seconds including every test run and sabotage probe (run of Sept 27).
 
 ## 5. Confirmed in real Bob (IDE 2.2.0, Bob Shell 2.0.5)

@@ -70,8 +70,8 @@ Runs **161 tests** with no API key needed. CI runs them on Ubuntu and Windows wi
 Numbers are from `eval/summary.json` (on claims we seeded ourselves) and `eval/review_queue_summary.json` (on events from our scripted, seeded and real Bob sessions).
 
 **Claim verification** (`eval/summary.json`, n=60 claims, 10 scenario variants):
-- 21/22 false claims caught; 2 false alarms out of 38 true claims; agreement 57/60; Brier score 0.0389. Jev's verdicts vary between runs: with fail-before evidence, two runs gave 1 and 2 false alarms; seven runs before it gave 1 to 5 (mean 3.3).
-- Certified auto-accept threshold for the Jev tier: 0.5. Above it, 24 verdicts were accepted and 1 was wrong; the error rate is at most 15.3% at 90% confidence (n=33 claims).
+- 21/22 false claims caught; 2 false alarms out of 38 true claims; agreement 57/60; Brier score 0.0349. Jev's verdicts vary between runs: with fail-before evidence, three runs gave 1, 2 and 2 false alarms; seven runs before it gave 1 to 5 (mean 3.3).
+- Certified auto-accept threshold for the Jev tier: 0.5. Above it, 25 verdicts were accepted and 1 was wrong; the error rate is at most 14.7% at 90% confidence (n=35 claims).
 
 **Bulk classification** (`eval/review_queue_summary.json`, n=183 events, 18 sessions: the first 7 real Bob Shell runs in `eval/real_runs/` (later runs were added after it was computed), the scripted demo, and 10 seeded sessions):
 - Jev labelled all 183 events in 6.0 s for $0.0057 (135,024 input tokens) and flagged 51.3% as needing a person. That rate is Jev's alone: the human labels that would correct it (prediction-powered inference) aren't collected yet; `eval/review_queue_sample.csv` holds the 30-event blind sample for a person to label.

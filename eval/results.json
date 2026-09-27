@@ -13,7 +13,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.99,
+      "p_supports": 0.98,
       "cited": [
         "E1",
         "E4"
@@ -28,8 +28,8 @@
       "kind": "implemented",
       "state": "verified",
       "code": null,
-      "tier": "jev_deep",
-      "p_supports": 0.93,
+      "tier": "jev",
+      "p_supports": 0.9,
       "cited": [
         "E2",
         "E4"
@@ -45,7 +45,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 1.0,
+      "p_supports": 0.99,
       "cited": [
         "E3",
         "E4"
@@ -137,7 +137,7 @@
       "state": "cant_check",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.34,
+      "p_supports": 0.3,
       "cited": [
         "E3",
         "E4"
@@ -166,7 +166,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.99,
+      "p_supports": 0.98,
       "cited": [
         "E1",
         "E3"
@@ -196,8 +196,8 @@
       "kind": "tests_added",
       "state": "verified",
       "code": null,
-      "tier": "jev_deep",
-      "p_supports": 0.88,
+      "tier": "jev",
+      "p_supports": 0.91,
       "cited": [
         "E2",
         "E3"
@@ -285,7 +285,7 @@
       "state": "needs_evidence",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.51,
+      "p_supports": 0.55,
       "cited": [
         "E2",
         "E4"
@@ -358,7 +358,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.99,
+      "p_supports": 0.98,
       "cited": [
         "E1",
         "E5"
@@ -374,7 +374,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.92,
+      "p_supports": 0.91,
       "cited": [
         "E2",
         "E5"
@@ -434,7 +434,7 @@
       "state": "contradicted",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.44,
+      "p_supports": 0.38,
       "cited": [
         "E2",
         "E4"
@@ -454,7 +454,7 @@
       "cited": [
         "E4"
       ],
-      "detail": "E4 is a failing test run: 3 failed, 2 passed in 0.04s"
+      "detail": "E4 is a failing test run: 3 failed, 2 passed in 0.03s"
     },
     {
       "id": "v06_not_wired_vacuous#0",
@@ -465,7 +465,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.97,
+      "p_supports": 0.99,
       "cited": [
         "E1",
         "E3"
@@ -553,7 +553,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.97,
+      "p_supports": 0.98,
       "cited": [
         "E1",
         "E5"
@@ -585,7 +585,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.97,
+      "p_supports": 0.96,
       "cited": [
         "E5"
       ],
@@ -613,7 +613,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.99,
+      "p_supports": 0.98,
       "cited": [
         "E1",
         "E4"
@@ -629,7 +629,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.89,
+      "p_supports": 0.88,
       "cited": [
         "E2",
         "E4"
@@ -645,7 +645,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.91,
+      "p_supports": 0.89,
       "cited": [
         "E3",
         "E4"
@@ -661,7 +661,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.95,
+      "p_supports": 0.96,
       "cited": [
         "E3",
         "E4"
@@ -723,8 +723,8 @@
       "kind": "tests_added",
       "state": "contradicted",
       "code": null,
-      "tier": "jev_deep",
-      "p_supports": 0.31,
+      "tier": "jev",
+      "p_supports": 0.25,
       "cited": [
         "E3",
         "E4"
@@ -755,8 +755,8 @@
       "kind": "implemented",
       "state": "verified",
       "code": null,
-      "tier": "jev",
-      "p_supports": 0.9,
+      "tier": "jev_deep",
+      "p_supports": 0.94,
       "cited": [
         "E2",
         "E4"
@@ -815,7 +815,7 @@
       "state": "contradicted",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.03,
+      "p_supports": 0.05,
       "cited": [
         "E2",
         "E4"
@@ -847,7 +847,7 @@
       "state": "cant_check",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.79,
+      "p_supports": 0.81,
       "cited": [
         "E2",
         "E4"
@@ -863,7 +863,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.89,
+      "p_supports": 0.88,
       "cited": [
         "E3",
         "E4"
@@ -879,7 +879,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.95,
+      "p_supports": 0.9,
       "cited": [
         "E3",
         "E4"
@@ -918,6 +918,6 @@
       "detail": ""
     }
   ],
-  "jev_input_tokens": 100784,
-  "seconds": 38
+  "jev_input_tokens": 97955,
+  "seconds": 40
 }
