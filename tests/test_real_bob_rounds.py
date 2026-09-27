@@ -1,15 +1,14 @@
 """Real Bob Shell runs, Sept 27: why the subagent task kept going round until the cost cap.
 - The same claim on the same diff was verified in one round and contradicted in the next ($2.51 run).
 - "Tests must assert on the specific changed behavior" (D5) went to an audit in four runs; each audit cost Bob a
-  round, and the Bob Shell audit never ran (no BOB_API_KEY in the MCP server).
+  round (the Bob Shell audit never ran: tests/test_shell_audit.py).
 - A docstring-only change was held to "Every behavior change must ship with a test that fails without the change".
 - Sept 28: two parallel subagents' rounds were held to each other's work ("stale", "replay_mismatch")."""
 import sys
 
 from conftest import FakeJev, make_repo
-from hallmonitor import bob, evidence as EV, gitutil, jev, receipts
+from hallmonitor import evidence as EV, gitutil, jev, receipts
 from hallmonitor.store import Store
-from test_bob_shell import REAL_RUN, fake_bob  # at import: before conftest stubs bob._run
 
 CMD = f'"{sys.executable}" -m pytest -q -p no:cacheprovider'
 D4 = "Every behavior change must ship with a test that fails without the change."
@@ -180,15 +179,3 @@ def test_another_subagents_half_written_test_doesnt_contradict_a_subagent(tmp_pa
     assert sub["rows"][0]["state"] == "verified" and sub["tests"]["command"].endswith("tests/test_a.py")
     main = receipts.verify(store, A_CLAIM)["rows"][0]  # the whole suite doesn't collect
     assert (main["state"], main["code"]) == ("contradicted", "replay_mismatch")
-
-
-# ------------------------------------------------------------------ the Bob Shell audit
-
-def test_an_audit_that_failed_before_it_ran_isnt_an_audit(tmp_path, monkeypatch):
-    store = repo(tmp_path)  # before the fake: it replaces subprocess.run for git too
-    monkeypatch.setattr(bob, "_run", REAL_RUN)
-    monkeypatch.setenv("BOB_API_KEY", "bob-key-value-123")
-    fake_bob(monkeypatch, stdout="Usage: bob run ...", stderr="Error: bad key bob-key-value-123", code=1)
-    assert bob.shell_audit(store.root, "Audit this claim independently: ...") is None
-    logged = Store(store.root).dir.joinpath("bob_runs.jsonl").read_text(encoding="utf-8")
-    assert "bad key <BOB_API_KEY>" in logged and "bob-key-value-123" not in logged

@@ -31,6 +31,7 @@ count), and the Stop hook as a backstop.
 """
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 import re
 import time
 from pathlib import Path
@@ -569,21 +570,25 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
 
     # Tier 3: still worth more scrutiny -> an independent Bob audit (Bob Shell if installed, else ask
     # the supervised Bob to spawn a read-only explore subagent and resubmit with its findings).
+    # The Bob Shell audits run in parallel within one time budget, so the round still answers Bob's submit_claims
+    # call in time; an audit that runs out of time falls back to the explore subagent.
     audits = []
-    for i in list(answers):
-        if tiers[i] == "jev_deep" and decisions[i].escalate:
-            brief_text = audit_brief(claims[i]["claim"], changed_files, tests, sab)
-            notes = bob.shell_audit(store.root, brief_text)
-            if notes:
-                audit_notes[i] = notes
-                try:
-                    a, u = jev.ask(*verdict_job(i, deep=True))
-                    answers[i], decisions[i], tiers[i] = a, judge(a, None), "bob_shell_audit"
-                    tok += jev.tokens(u)
-                except jev.JevRefused:
-                    audits.append({"index": i, "claim": claims[i]["claim"], "brief": brief_text})
-            else:
-                audits.append({"index": i, "claim": claims[i]["claim"], "brief": brief_text})
+    deep = [i for i in answers if tiers[i] == "jev_deep" and decisions[i].escalate]
+    briefs = {i: audit_brief(claims[i]["claim"], changed_files, tests, sab) for i in deep}
+    with ThreadPoolExecutor(max_workers=max(len(deep), 1)) as pool:
+        found = dict(zip(deep, pool.map(lambda i: bob.shell_audit(store.root, briefs[i],
+                                                                  timeout=cfg["shell_audit_timeout"]), deep)))
+    for i in deep:
+        if found[i]:
+            audit_notes[i] = found[i]
+            try:
+                a, u = jev.ask(*verdict_job(i, deep=True))
+                answers[i], decisions[i], tiers[i] = a, judge(a, None), "bob_shell_audit"
+                tok += jev.tokens(u)
+            except jev.JevRefused:
+                audits.append({"index": i, "claim": claims[i]["claim"], "brief": briefs[i]})
+        else:
+            audits.append({"index": i, "claim": claims[i]["claim"], "brief": briefs[i]})
 
     rows = []
     for i, c in enumerate(claims):

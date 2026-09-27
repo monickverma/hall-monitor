@@ -32,15 +32,14 @@ RUBRIC = {
     "receipts": (0.25, 8.5, "Per-claim verdicts on evidence Hall Monitor produced itself: fresh tests, sabotage, "
                             "and changed tests re-run on the code before the change"),
     "step monitor": (0.20, 7.5, "Least-harm judgment of every intent; excuses named; code rules before Jev"),
-    "robustness in real Bob": (0.15, 6.0, "Single-agent tasks verify in real Bob (docs, /decisions x2, and "
+    "robustness in real Bob": (0.15, 6.5, "Single-agent tasks verify in real Bob (docs, /decisions x2, and "
                                           "test-first in its first round). The task with two parallel subagents "
-                                          "verified for the first time on Sept 28 ($1.95 of a $2.50 cap, 4 minutes, "
-                                          "0 send-backs), after fixes for what its earlier runs showed: D2 'needs "
-                                          "evidence' with no password code, D5 sent to audits, verdicts that changed "
-                                          "on an unchanged diff, and subagents held to each other's edits. That is "
-                                          "one run (n=1). A subagent's claim that it left a file alone is still "
-                                          "checked against the shared diff, and the Bob Shell audit has never run "
-                                          "in real Bob"),
+                                          "never verified in 7 runs, then verified in both finished runs after the "
+                                          "Sept 28 fixes (n=2): $1.95 and $2.44 of a $2.50 cap, 0 send-backs, the "
+                                          "second in the main agent's first round with a Bob Shell audit. Still "
+                                          "weak: intents to write the tests D4/D5 require are judged off task or "
+                                          "rationalizing (6 of 11 stops in the second run), and a subagent's claim "
+                                          "that it left a file alone is checked against the shared diff"),
     "explainability": (0.10, 8, "Hall Pass built from the session's own log; says why a task stopped"),
     "rules and plan": (0.10, 7, "Policy PDF and prompt lines become rules; plan gate on PLAN.md"),
     "drift and stalls": (0.05, 6, "Named stall patterns and checkpoints; one real false stall, fixed"),
@@ -92,6 +91,10 @@ def real_run(hm):
         parts = {t.strip() for t in str(s.get("target") or "").split(", ")}
         return any(j > at[id(s)] and t in parts for j, t in allows)
     stats = runs[-1].get("stats") or {}
+    # The Receipts auditor's own `bob run`s (bob.shell_audit) spend outside the supervised run's cost cap.
+    audits = sum((r.get("stats") or {}).get("session_costs") or 0
+                 for r in jsonl(hm / "bob_runs.jsonl") if r.get("mode") == "hm-auditor")
+    usd = stats.get("session_costs")
     return {"name": hm.parent.name, "final": rounds[-1]["action"] if rounds else "none",
             "first": rounds[0]["action"] if rounds else "none",
             "send_backs": sum(1 for r in rounds if r.get("action") in ("send_back", "stuck")),
@@ -102,7 +105,8 @@ def real_run(hm):
             "subagents": sum(1 for e in ev if e.get("stage") in ("spawn", "subagent_return")),
             "doc_rules": sum(1 for d in jsonl(hm / "ledger.jsonl") if d.get("source") not in (None, "user")),
             "jev_usd": jev.cost(sum(e.get("tokens") or 0 for e in ev)),
-            "bob_usd": stats.get("session_costs"), "minutes": (stats.get("duration_ms") or 0) / 60000}
+            "bob_usd": usd + audits if usd is not None else None, "audit_usd": audits,
+            "minutes": (stats.get("duration_ms") or 0) / 60000}
 
 
 def session_file(path):
