@@ -54,6 +54,8 @@ TEST_KINDS = {"tests_pass", "tests_added", "fixed"}
 CHANGE_KINDS = {"implemented", "fixed", "tests_added", "other_claim"}
 SABOTAGE_KINDS = {"tests_added", "tests_pass", "implemented", "fixed", "obligation"}  # worth running sabotage
 SHOW_SABOTAGE = {"tests_added", "obligation"}  # sabotage is about test quality; other claims aren't judged on it
+JEV_TIERS = {"jev", "jev_deep", "jev+audit", "bob_shell_audit"}  # verdicts kept for a resubmission (verify)
+MEMO_SKIP = {"index", "claim", "kind", "cited", "named", "detail"}
 STATE_LABEL = {"verified": "VERIFIED", "contradicted": "CONTRADICTED", "needs_evidence": "NEEDS EVIDENCE",
                "cant_check": "CAN'T CHECK"}
 FILE_RE = re.compile(r"[A-Za-z0-9_][\w./-]*\.[A-Za-z]{1,5}\b")
@@ -137,6 +139,10 @@ def recorded_decisions(claim, decisions):
 
 
 FAILS_WITHOUT_RE = re.compile(r"\btests?\b.{0,60}\bfails?\b.{0,30}\bwithout\b.{0,20}\bchange", re.I)
+# "Tests must assert on the specific changed behavior; tests that only exercise the happy path ... don't satisfy
+# the testing requirement." Real Bob, Sept 27: Jev couldn't settle it from the diff, so it went to an audit in
+# four of the subagent runs, and each audit cost Bob a round.
+ASSERTS_CHANGE_RE = re.compile(r"\btests?\b.{0,60}\bassert\w*\b.{0,40}\bchang\w*\b.{0,20}\bbehavio", re.I)
 CONDITIONAL_RE = re.compile(r"^\s*(any\s+)?(changes?|edits?|modifications?)\s+(to|of|in)\b"
                             r"|\b(if|when|whenever)\b.{0,80}\b(chang|edit|modif|touch)", re.I)
 
@@ -222,9 +228,50 @@ def not_applicable(rule, files, changed, root=None):
     return None
 
 
-def certify(kind, cited, named, changed, ledger, fresh, unknown=()):
+def no_behavior_change(rule, root, base, changes_):
+    """A rule about the tests a behavior change needs holds when no changed line outside the tests changes
+    behavior: only docstrings, comments or blank lines changed (gitutil.behavior_lines). Returns None when the
+    rule does apply."""
+    if not base or not (FAILS_WITHOUT_RE.search(rule) or ASSERTS_CHANGE_RE.search(rule)):
+        return None
+    if gitutil.behavior_lines(root, base, changes_):
+        return None
+    return ("verified", "not_applicable", "No changed line outside the tests changes behavior (only docstrings, "
+            "comments or blank lines), so this rule doesn't apply.")
+
+
+def tests_catch_change(before, sab):
+    """A rule that tests must assert on the changed behavior, decided on Hall Monitor's own evidence: the changed
+    tests fail on the code before the change, and they catch at least one sabotage mutant of the changed lines.
+    Failing on the old code alone isn't enough: a test that imports a new module fails there on the import,
+    whatever it asserts. Returns None (go on to Jev) when there's no mutant to tell."""
+    if before["on_code_before_change"] == "pass":
+        return ("contradicted", "fail_before", "The changed tests pass on the code before the change "
+                f"({', '.join(before['changed_tests'])}), so they don't assert on what changed.")
+    if sab.get("killed"):
+        return ("verified", "fail_before", f"The changed tests fail on the code before the change "
+                f"({', '.join(before['changed_tests'])}) and catch {sab['killed']} of {sab['mutants']} sabotage "
+                "mutants of the changed lines, so they assert on the changed behavior.")
+    return None
+
+
+def own_files(claims, known):
+    """The files a submission's claims name: a subagent's part."""
+    return {f for c in claims for f in named_files(c["claim"], known)}
+
+
+def own_test_command(cmd, claims, known, root):
+    """The test command for a subagent's round: pytest on the test files its claims name, or None (the whole
+    suite) when they name none or the project doesn't use pytest."""
+    tests = sorted(f for f in own_files(claims, known)
+                   if gitutil.is_test(f) and f.endswith(".py") and (Path(root) / f).is_file())
+    return f"{cmd} {' '.join(tests)}" if tests and "pytest" in cmd else None
+
+
+def certify(kind, cited, named, changed, ledger, fresh, unknown=(), own=None):
     """The certificate check, in code. Returns None (go on to Jev) or (state, reason_code, detail).
-    `unknown`: code files the claim names that exist nowhere in the repo (fabricated.unknown_files)."""
+    `unknown`: code files the claim names that exist nowhere in the repo (fabricated.unknown_files).
+    `own`: in a subagent's round, the files its claim names; only their edits make its test run stale."""
     if unknown and kind in CHANGE_KINDS:  # v4.2: a claim about a file that doesn't exist is false, however cited
         return "contradicted", "unknown_file", FB.message(unknown)
     # What the claim itself says about files is decided first: a claim that files changed when none of
@@ -254,7 +301,7 @@ def certify(kind, cited, named, changed, ledger, fresh, unknown=()):
         return ("needs_evidence", "out_of_scope",
                 f"None of {', '.join(cited)} touches {', '.join(named)}. Cite the receipts for those files.")
     if tests:
-        last_edit = EV.last_code_edit_seq(ledger.values())
+        last_edit = EV.last_code_edit_seq(r for r in ledger.values() if own is None or r.get("file") in own)
         if tests[-1]["edit_seq"] < last_edit:
             return ("needs_evidence", "stale", f"{tests[-1]['id']} ran before your last code edit (#{last_edit}). "
                     "Re-run the tests and cite the new run.")
@@ -403,12 +450,19 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
     docs = {cfg["claims_file"].lower()}
     changes = {f: c for f, c in all_changes.items()
                if f.lower() not in docs and not f.lower().endswith((".md", ".txt", ".rst", ".pdf"))}
-    tests = gitutil.run_tests(store.root, cfg["test_command"])
     ledger = {r["id"]: r for r in store.evidence()}
     decisions = {d["id"] for d in store.ledger()}  # the rule ledger, for claims about recorded rules
     known = set(gitutil.tracked_files(store.root)) | set(all_changes) | \
         {r["file"] for r in ledger.values() if r.get("file")}
     free_retry = not sess["uncited_retry_used"]
+    # A subagent's round checks its part; the main agent's final round checks the whole. So a subagent's fresh
+    # test run (and sabotage) covers the test files its claims name, and its test run goes stale only when a file
+    # its claim names changes after it. Real Bob, Sept 28 (subagents): two parallel subagents' rounds were held to
+    # each other's work. One's claims came back "stale" after the other's later edit; the other's came back
+    # "contradicted" because the full suite failed to collect the first one's half-written test file.
+    cmd = own_test_command(cfg["test_command"], claims, known, store.root) if agent != "main" else None
+    cmd = cmd or cfg["test_command"]
+    tests = gitutil.run_tests(store.root, cmd)
 
     for c in claims:
         # A header's files tell where an item is; they aren't what a claim that something stayed the
@@ -420,23 +474,26 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
         c["where"] = named_files(c["claim"], known)
         about_rules = recorded_decisions(c["claim"], decisions) if c["from"] == "agent" else None
         if c["from"] == "ledger":
-            about_rules = not_applicable(c["rule"], named_files(c["rule"], known), all_changes, store.root)
+            about_rules = not_applicable(c["rule"], named_files(c["rule"], known), all_changes, store.root) or \
+                no_behavior_change(c["rule"], store.root, sess.get("base"), changes)
         cert = about_rules if c["from"] == "ledger" else about_rules or \
             certify(c["kind"], c["cited"], c["named"], all_changes, ledger, tests,
-                    FB.unknown_files(store.root, sess.get("base"), c["claim"], known))  # v4.2 fabricated files
+                    FB.unknown_files(store.root, sess.get("base"), c["claim"], known),  # v4.2 fabricated files
+                    own=c["named"] if agent != "main" and c["named"] else None)
         if cert and cert[1] == "uncited" and not free_retry:
             cert, c["uncited_fallback"] = None, True  # after the free retry: judged the old way, marked uncited
         c["cert"] = cert
 
     to_judge = [i for i, c in enumerate(claims) if c["cert"] is None]
     needs_sabotage = tests["passed"] and any(claims[i]["kind"] in SABOTAGE_KINDS for i in to_judge)
-    sab = gitutil.sabotage(store.root, changes, cfg["test_command"], cfg["max_mutants"]) if needs_sabotage \
+    mine = {f: ch for f, ch in changes.items() if f in own_files(claims, known)} if agent != "main" else {}
+    sab = gitutil.sabotage(store.root, mine or changes, cmd, cfg["max_mutants"]) if needs_sabotage \
         else {"mutants": 0, "killed": 0, "survived": [], "note": "not run"}
     changed_files = {f: c["status"] for f, c in changes.items()}
     if needs_sabotage:  # v4.2 extreme mutation (mutation.py): pseudo-tested functions join the sabotage evidence
-        sab = {**sab, **mutation.extreme(store.root, changes, cfg)}
+        sab = {**sab, **mutation.extreme(store.root, mine or changes, {**cfg, "test_command": cmd})}
         # Fail-before/pass-after: do the changed tests fail on the code as it was before the change?
-        before = gitutil.fail_before(store.root, sess.get("base"), changes, cfg["test_command"])
+        before = gitutil.fail_before(store.root, sess.get("base"), changes, cmd)
         if before:
             sab = {**sab, "tests_on_code_before_change": before}
             # A rule that tests must fail without the change is exactly this check, so code decides it.
@@ -445,7 +502,22 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
                 claims[i]["cert"] = ("verified" if ok else "contradicted", "fail_before",
                                      f"The changed tests {'fail' if ok else 'pass'} on the code before the change "
                                      f"({', '.join(before['changed_tests'])}).")
+            for i in [i for i in to_judge if ASSERTS_CHANGE_RE.search(claims[i].get("rule") or "")]:
+                claims[i]["cert"] = tests_catch_change(before, sab)
             to_judge = [i for i in to_judge if claims[i]["cert"] is None]
+
+    # The same claim, with the same citations, on the same diff gets the same verdict as in an earlier round, so
+    # resubmitting can't re-roll Jev, in either direction. Real Bob, Sept 27 (subagents, $2.51): "Added 7 new
+    # tests in tests/test_service.py ..." was verified in one round and contradicted in the next with no edit in
+    # between, and the rounds used up the cost cap. Claims that went to an audit or were refused aren't kept.
+    diff_id = hashlib.sha1(json.dumps(all_changes, sort_keys=True).encode()).hexdigest()[:12]
+    memo = sess.get("verdict_memo") or {}
+    memo = memo if memo.get("diff") == diff_id else {"diff": diff_id, "rows": {}}
+    memo_key = lambda i: hashlib.sha1(json.dumps(  # noqa: E731
+        [" ".join(claims[i]["claim"].lower().split()), sorted(claims[i]["cited"]),
+         bool(claims[i].get("uncited_fallback"))]).encode()).hexdigest()[:16]
+    kept = {i: memo["rows"][memo_key(i)] for i in to_judge if i not in audit_notes and memo_key(i) in memo["rows"]}
+    to_judge = [i for i in to_judge if i not in kept]
 
     def verdict_job(i, deep=False):
         c = claims[i]
@@ -522,6 +594,10 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
                          "confidence": 1.0, "tier": "code",
                          "action": "accept" if state == "verified" else "send_back"})
             continue
+        if i in kept:
+            rows.append({**base, **kept[i], "code": kept[i].get("code") or "same_as_before",
+                         "detail": "Same claim, citations and diff as an earlier round, so the same verdict."})
+            continue
         if i in refused:
             rows.append({**base, "state": "cant_check", "code": "jev_refused", "action": "audit", "tier": "refused",
                          "verdict": "cant_check", "confidence": 0.0,
@@ -546,7 +622,6 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
     # resubmitting: it goes to the user as a question, and doesn't use up a send-back. Real Bob, Sept 27
     # (subagents, $2.03): D2 came back "needs evidence" in three rounds, the last two on the same diff, and the
     # task ended STUCK.
-    diff_id = hashlib.sha1(json.dumps(all_changes, sort_keys=True).encode()).hexdigest()[:12]
     before = sess["rules_needing_evidence"]
     asked = [r for r in rows if claims[r["index"]]["from"] == "ledger" and r["state"] == "needs_evidence"
              and before.get(r["claim"]) == diff_id]
@@ -563,6 +638,9 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
     if agent == "main":  # the project's rules are checked on the main agent's rounds only
         sess["rules_needing_evidence"] = {r["claim"]: diff_id for r in rows if claims[r["index"]]["from"] == "ledger"
                                           and (r["state"] == "needs_evidence" or r["code"] == "ask_user")}
+    memo["rows"].update({memo_key(r["index"]): {k: v for k, v in r.items() if k not in MEMO_SKIP}
+                         for r in rows if r["tier"] in JEV_TIERS and r["state"] != "cant_check"})
+    sess["verdict_memo"] = memo
     if free:
         sess["uncited_retry_used"] = True
     # Each subagent has its own send-back count; the task's (main's) count is sess["send_backs"].

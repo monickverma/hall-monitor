@@ -1,0 +1,1 @@
+{"t": 1790520170.7891462, "mode": "supervised", "prompt": "Set a 60-second timeout for the hall-monitor server in .bob/mcp.json.", "status": "success", "stats": {"task_id": "3fa04b025051a1d35a38ca6d1085b824", "duration_ms": 22517, "session_costs": 0.19049800000000003, "max_cost": 0.2, "tool_calls": 6}}

@@ -7,14 +7,14 @@
   "false_alarms": 2,
   "true_claims": 38,
   "agreement": 57,
-  "brier": 0.0349,
+  "brier": 0.0312,
   "certified": {
     "jev": {
       "threshold": 0.5,
       "accepted": 25,
       "wrong": 1,
       "upper_bound": 0.14686719614856408,
-      "claims": 35
+      "claims": 34
     }
   },
   "alpha": 0.2,
