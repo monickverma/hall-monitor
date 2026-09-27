@@ -79,14 +79,21 @@ def real_run(hm):
         [e for e in ev_main if e.get("stage") == "receipts"]
     judged = [e for e in ev if e.get("stage") in ("intent", "step", "plan", "spawn")]  # as report.py counts them
     stops = [e for e in judged if e.get("action") in ("block", "ask_human", "restate")]
-    allowed = {e.get("target") for e in ev if e.get("stage") == "step" and e.get("action") == "allow"}
+    # A stop was later allowed if a step on its target (an intent's targets are "a, b") was allowed AFTER it:
+    # an allow that came before the stop, under another agent's intent, doesn't make the stop a false one.
+    allows = [(i, e.get("target")) for i, e in enumerate(ev) if e.get("stage") == "step" and e.get("action") == "allow"]
+    at = {id(e): i for i, e in enumerate(ev)}
+
+    def later_allowed(s):
+        parts = {t.strip() for t in str(s.get("target") or "").split(", ")}
+        return any(j > at[id(s)] and t in parts for j, t in allows)
     stats = runs[-1].get("stats") or {}
     return {"name": hm.parent.name, "final": rounds[-1]["action"] if rounds else "none",
             "first": rounds[0]["action"] if rounds else "none",
             "send_backs": sum(1 for r in rounds if r.get("action") in ("send_back", "stuck")),
             "judged": len(judged), "stops": len(stops),
             "excuses": sum(1 for e in ev if e.get("pattern") and e.get("stage") != "stall"),
-            "stops_later_allowed": sum(1 for s in stops if s.get("target") in allowed),
+            "stops_later_allowed": sum(1 for s in stops if later_allowed(s)),
             "stalls": sum(1 for e in ev if e.get("stage") == "stall"),
             "subagents": sum(1 for e in ev if e.get("stage") in ("spawn", "subagent_return")),
             "doc_rules": sum(1 for d in jsonl(hm / "ledger.jsonl") if d.get("source") not in (None, "user")),

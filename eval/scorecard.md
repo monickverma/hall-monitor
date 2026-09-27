@@ -24,7 +24,7 @@ score = min(quality, cap of the strongest evidence). Evidence: E0 design · E1 u
 - ended stuck: 4/10
 - excuses named: 2
 - stops per 10 actions judged: 1.4
-- stops later allowed on the same target: 8/14
+- stops later allowed on the same target: 7/14
 - median Bob cost per run: 0.84
 - median minutes per run: 1.6
 - seeded: caught: 21/22

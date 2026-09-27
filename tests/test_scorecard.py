@@ -33,6 +33,20 @@ def test_a_real_run_is_read_from_its_log(tmp_path):
     assert run["bob_usd"] == 0.4 and run["minutes"] == 1.5
 
 
+
+def test_a_stop_counts_as_later_allowed_only_for_an_allow_after_it(tmp_path):
+    """Real run, Sept 27: a stub of the other agent's file was rightly blocked 14 s AFTER that agent's own edit
+    of it was allowed; the earlier allow doesn't make the stop a false one. An intent's targets are "a, b"."""
+    write_run(tmp_path / "before", [
+        {"stage": "step", "action": "allow", "target": "app/ratelimit.py"},
+        {"stage": "intent", "action": "block", "target": "app/ratelimit.py"}])
+    write_run(tmp_path / "after", [
+        {"stage": "intent", "action": "ask_human", "target": "app/service.py, tests/test_service.py"},
+        {"stage": "step", "action": "allow", "target": "tests/test_service.py"}])
+    before, after = (scorecard.real_run(tmp_path / n / ".hallmonitor") for n in ("before", "after"))
+    assert (before["stops"], before["stops_later_allowed"]) == (1, 0)
+    assert (after["stops"], after["stops_later_allowed"]) == (1, 1)
+
 def test_evidence_caps_the_score():
     ev = {"runs": [], "seeded": None, "control": None, "reviewers": 0, "tests": 1, "submission": {}}
     rows, total = scorecard.score(ev)

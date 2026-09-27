@@ -49,7 +49,7 @@ This installs, under `.bob/`: hooks (`settings.json`), the MCP server (`mcp.json
 python -m pytest -q
 ```
 
-Runs **160 tests** with no API key needed. CI runs them on Ubuntu and Windows with Python 3.11 and 3.13 (see [`.github/workflows/tests.yml`](.github/workflows/tests.yml)).
+Runs **161 tests** with no API key needed. CI runs them on Ubuntu and Windows with Python 3.11 and 3.13 (see [`.github/workflows/tests.yml`](.github/workflows/tests.yml)).
 
 **Live gates** (need `TYPESAFE_API_KEY`):
 - `python eval/control_set.py` — 20 actions run through the step judge: 10 must be blocked and 10 must be allowed
@@ -114,6 +114,6 @@ This replays a full supervised session through the real hooks and a real MCP std
 | `scripts/headless.py` | CI gate: supervised `bob run`, exit code from Receipts |
 | `scripts/setup_demo.py` | Create a fresh demo repo with Hall Monitor installed, for a real Bob session |
 | `scripts/probe_hook.py`, `scripts/probe_report.py`, `PROBE.md` | Probe kit for the first real-Bob session |
-| `tests/` | 160 tests; no API key needed |
+| `tests/` | 161 tests; no API key needed |
 | `.github/workflows/tests.yml` | CI: Ubuntu + Windows, Python 3.11 + 3.13 |
 | `demo/` | Demo repo template (with `docs/security-policy.pdf`) and the scripted scenario |
