@@ -55,10 +55,41 @@ FILE_RE = re.compile(r"[A-Za-z0-9_][\w./-]*\.[A-Za-z]{1,5}\b")
 CITE_RE = re.compile(r"\bE\d+\b")
 
 
+HEADER_TAG = "from the header:"
+HEADER_TAG_RE = re.compile(r" \[from the header: [^\]]*\]$")
+BULLET_RE = re.compile(r"^([-*\u2022]|\d+[.)])\s+")
+MD_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+
+
+def _under_headers(text):
+    """Free text with each list item tagged with the files and receipt IDs of the header it sits under.
+    Real Bob, Sept 27: Bob grouped its claims under lines like "**[`README.md`](README.md)** — E1:". Each
+    header was judged as a claim of its own, and the items below it came back uncited, or contradicted
+    for naming only the files they point to. A line ending in ":" that introduces a list is not a claim."""
+    lines = [x.strip() for x in (text or "").splitlines()]
+    body = [x for x in lines if x]
+    out, tag = [], ""
+    for k, line in enumerate(body):
+        nxt = body[k + 1] if k + 1 < len(body) else ""
+        if line.startswith("#") or line.endswith(":"):  # headings and introductions are never claims
+            tag = ""
+            if line.endswith(":") and (BULLET_RE.match(nxt) or nxt.endswith(":")):
+                plain = re.sub(r"[*`]+", "", MD_LINK_RE.sub(r"\1", line))
+                refs = list(dict.fromkeys(FILE_RE.findall(plain) + CITE_RE.findall(plain)))
+                tag = f" [{HEADER_TAG} {' '.join(refs)}]" if refs else ""
+            continue
+        if BULLET_RE.match(line):
+            line = BULLET_RE.sub("", line) + tag
+        else:
+            tag = ""
+        out.append(line)
+    return "\n".join(out)
+
+
 def parse(claims_or_summary):
     """[(text, cited IDs)] from certificate objects {claim, evidence}, plain strings, or free text.
     Inline citations such as "[E12]" count, so a CLAIMS.md file can cite receipts too."""
-    items = brief.sentences(claims_or_summary, limit=20) if isinstance(claims_or_summary, str) \
+    items = brief.sentences(_under_headers(claims_or_summary), limit=20) if isinstance(claims_or_summary, str) \
         else list(claims_or_summary or [])
     out = []
     for c in items:
@@ -148,19 +179,21 @@ STOPWORDS = {"that", "this", "with", "from", "into", "each", "every", "when", "t
 EXCERPT_OVER = 20  # a file with more added lines than this is excerpted when the diff doesn't fit
 
 
-def _excerpt(c, words, context=1, max_hits=40):
-    """A long file edit cut down to the added lines that share words with the claim (a line of context
-    either side), after its first lines. Each gap is marked, so a cut is never read as an absence."""
+def _excerpt(c, words, room):
+    """A long file edit cut down to about `room` characters: the added lines that share the most words
+    with the claim, then their neighbours, in file order; its first lines only if none share a word.
+    Each gap is marked, so a cut is never read as an absence."""
     added = c["added"]
     score = [len(words & set(WORD_RE.findall(t.lower()))) for _, t in added]
-    hits = [k for k, n in enumerate(score) if n]
-    if len(hits) > max_hits:  # common words: keep the lines that share the most
-        floor = sorted((score[k] for k in hits), reverse=True)[max_hits - 1]
-        hits = [k for k in hits if score[k] >= floor][:max_hits]
-    keep = sorted(set(range(min(5, len(added))))
-                  | {j for k in hits for j in range(k - context, k + context + 1) if 0 <= j < len(added)})
+    order = sorted((k for k, n in enumerate(score) if n), key=lambda k: (-score[k], k)) or list(range(len(added)))
+    keep, used = set(), 0
+    for k in order + [j for k in order for j in (k - 1, k + 1) if 0 <= j < len(added)]:
+        size = len(added[k][1]) + 2
+        if k not in keep and used + size <= room:
+            keep.add(k)
+            used += size
     rows, prev = [], -1
-    for j in keep:
+    for j in sorted(keep):
         if j > prev + 1:
             rows.append((None, f"[... {j - prev - 1} added lines not shown]"))
         rows.append(added[j])
@@ -183,9 +216,11 @@ def _relevant_diff(changes, claim, budget=FOCUSED_DIFF_BUDGET):
     text = gitutil.diff_text(ordered, budget)
     if "not shown]" not in text:
         return text
-    key = {w for w in WORD_RE.findall(claim.lower()) if w not in STOPWORDS}
-    return gitutil.diff_text({f: _excerpt(c, key) if len(c["added"]) > EXCERPT_OVER else c
-                              for f, c in ordered.items()}, budget)
+    key = {w for w in WORD_RE.findall(HEADER_TAG_RE.sub("", claim).lower()) if w not in STOPWORDS}
+    long = [f for f, c in ordered.items() if len(c["added"]) > EXCERPT_OVER]
+    short = sum(len(gitutil.diff_text({f: c}, budget)) for f, c in ordered.items() if f not in long)
+    room = max(500, (budget - short) // max(1, len(long)) - 150)  # 150: the header and gap markers
+    return gitutil.diff_text({f: _excerpt(c, key, room) if f in long else c for f, c in ordered.items()}, budget)
 
 
 def _receipt_view(r):
@@ -254,7 +289,11 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
     free_retry = not sess["uncited_retry_used"]
 
     for c in claims:
-        c["named"] = named_files(c["claim"], known) if c["from"] == "agent" else []
+        # A header's files tell where an item is; they aren't what a claim that something stayed the
+        # same is about ("First line kept as ..." under a README.md header).
+        said = HEADER_TAG_RE.sub("", c["claim"]) if c["kind"] == "unchanged" else c["claim"]
+        c["named"] = named_files(said, known) if c["from"] == "agent" else []
+        c["where"] = named_files(c["claim"], known) if c["from"] == "agent" else []  # the diff Jev is shown
         cert = None if c["from"] == "ledger" else \
             certify(c["kind"], c["cited"], c["named"], all_changes, ledger, tests,
                     FB.unknown_files(store.root, sess.get("base"), c["claim"], known))  # v4.2 fabricated files
@@ -272,7 +311,9 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
 
     def verdict_job(i, deep=False):
         c = claims[i]
-        scope = {f: ch for f, ch in changes.items() if f in c["named"]} or changes
+        # A claim that names a changed doc is judged on that doc's diff. Real Bob, Sept 27: docs were left
+        # out of every diff, so each claim about README.md met an empty one and came back "says nothing".
+        scope = {f: ch for f, ch in all_changes.items() if f in c["where"] and f.lower() not in docs} or changes
         diff = _relevant_diff(scope, c["claim"], DEEP_DIFF_BUDGET if deep else FOCUSED_DIFF_BUDGET)
         if c["cited"] and not c.get("uncited_fallback"):
             ev = {"cited_receipts": [_receipt_view(ledger[x]) for x in c["cited"]],
