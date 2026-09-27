@@ -56,7 +56,8 @@ def diff_from(root, ref):
 def changes(root, base):
     """Added lines per changed file since `base`, including untracked files.
 
-    Returns {path: {"status": "modified"|"new", "added": [(lineno, text)], "removed": int}}.
+    Returns {path: {"status": "modified"|"new", "added": [(lineno, text)], "removed": int,
+    "removed_lines": [text]}}.
     """
     out = {}
     cur = None
@@ -64,7 +65,7 @@ def changes(root, base):
         if line.startswith("+++ "):
             cur = None if line.endswith("/dev/null") else line[6:]
             if cur:
-                out.setdefault(cur, {"status": "modified", "added": [], "removed": 0})
+                out.setdefault(cur, {"status": "modified", "added": [], "removed": 0, "removed_lines": []})
         elif line.startswith("@@") and cur:
             new_start = int(re.match(r"@@ -\S+ \+(\d+)", line)[1])
             out[cur]["_next"] = new_start
@@ -74,6 +75,7 @@ def changes(root, base):
             out[cur]["_next"] = n + 1
         elif cur and line.startswith("-") and not line.startswith("---"):
             out[cur]["removed"] += 1
+            out[cur]["removed_lines"].append(line[1:])
     for f in git(root, "ls-files", "--others", "--exclude-standard").splitlines():
         p = Path(root) / f
         if p.is_file():
@@ -81,7 +83,7 @@ def changes(root, base):
                 lines = p.read_text(encoding="utf-8").splitlines()
             except UnicodeDecodeError:
                 continue
-            out[f] = {"status": "new", "added": list(enumerate(lines, 1)), "removed": 0}
+            out[f] = {"status": "new", "added": list(enumerate(lines, 1)), "removed": 0, "removed_lines": []}
     for v in out.values():
         v.pop("_next", None)
     return out

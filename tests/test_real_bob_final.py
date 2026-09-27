@@ -89,3 +89,36 @@ def test_an_edit_is_matched_to_the_parallel_agent_whose_intent_it_fits(tmp_path,
     step_event = [e for e in store.events() if e["stage"] == "step"][-1]
     assert step_event["action"] == "allow" and step_event["intent"] == "I1"  # subagent-A's intent
     assert all(it["verdict"] == "approved" for it in Store(store.root).session()["intents"])  # nothing revoked
+
+
+PASSWORD_RULE = "Password comparison must use a constant-time algorithm (do not use == or != for password comparison)."
+
+
+def test_a_rule_about_code_the_change_doesnt_touch_doesnt_apply(tmp_path, monkeypatch):
+    """Real Bob run 10 ($1.50, subagents): rule D2 came back "needs evidence" on a rate-limit change with no
+    password code, and Bob spent the rest of its cost cap answering it. A rule about every change still applies."""
+    monkeypatch.setattr(jev, "ask", FakeJev())
+    store = repo(tmp_path)
+    store.add_decision(PASSWORD_RULE, "docs/security-policy.pdf §2", kind="obligation")
+    change(store, "from app.rl import limit\n\ndef test_limit():\n    assert limit() == 5  # not a password\n")
+    rows = receipts.verify(store, [{"claim": "Raised the limit in app/rl.py.", "evidence": ["E1"]}])["rows"]
+    d2 = next(r for r in rows if "D2" in r["claim"])
+    assert (d2["state"], d2["code"], d2["tier"]) == ("verified", "not_applicable", "code")
+    assert next(r for r in rows if "D1" in r["claim"])["code"] == "fail_before"  # every change: still checked
+    for rule in (RULE, "Tests must assert on the specific changed behavior.", "Do not add dependencies.",
+                 "The finished work must include a changelog entry."):
+        assert receipts.untouched_subject(rule, {}) is None, rule
+
+
+def test_a_rule_about_code_the_change_touches_is_judged(tmp_path, monkeypatch):
+    monkeypatch.setattr(jev, "ask", FakeJev())
+    store = repo(tmp_path)
+    store.add_decision(PASSWORD_RULE, "docs/security-policy.pdf §2", kind="obligation")
+    changed = {"app/auth.py": {"status": "modified", "added": [(9, "    return expected == given")],
+                               "removed": 1, "removed_lines": ["    return hmac.compare_digest(expected, given)"]}}
+    assert receipts.not_applicable(PASSWORD_RULE, [], changed) is None  # a removed line counts too
+    change(store, "from app.rl import limit\n\ndef test_limit():\n    assert limit() == 5\n")
+    (store.root / "app/rl.py").write_text("def limit(password=''):\n    return 5\n", encoding="utf-8")
+    EV.record({"tool": "write_file", "input": {"path": "app/rl.py", "content": "..."}}, store)
+    rows = receipts.verify(store, [{"claim": "Raised the limit in app/rl.py.", "evidence": ["E1"]}])["rows"]
+    assert next(r for r in rows if "D2" in r["claim"])["tier"] != "code"  # it applies now: judged on evidence
