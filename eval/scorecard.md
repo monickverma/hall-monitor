@@ -20,7 +20,7 @@ score = min(quality, cap of the strongest evidence). Evidence: E0 design · E1 u
 
 - real runs: 10
 - verified in the first round: 3/9
-- ended verified: 3/10
+- ended verified: 2/10
 - ended stuck: 4/10
 - excuses named: 2
 - stops per 10 actions judged: 1.4
@@ -39,10 +39,10 @@ score = min(quality, cap of the strongest evidence). Evidence: E0 design · E1 u
 | 2026-09-27_taskB-docs_member1 | unknown | stuck | None | None | None | 2.91 | 7.3 |
 | 2026-09-27_decisions-then-subagents_stuck | send_back | stuck | 3 | 19 | 5 |  | 0.0 |
 | 2026-09-27_docs_no-jev-key | none | none | 0 | 1 | 1 | 0.19 | 0.5 |
-| 2026-09-27_docs_stuck-before-fix | send_back | stuck | 3 | 5 | 1 | 0.39 | 0.7 |
+| 2026-09-27_docs_stuck-before-fix | send_back | stuck | 4 | 5 | 1 | 0.39 | 0.7 |
 | 2026-09-27_docs_verified | accept | accept | 0 | 2 | 0 | 0.18 | 0.3 |
 | 2026-09-27_final_decisions-then-subagents_stuck | accept | stuck | 4 | 16 | 1 | 1.03 | 1.9 |
-| 2026-09-27_merged_decisions-then-subagents_sent-back | accept | accept | 0 | 12 | 3 | 0.84 | 1.5 |
+| 2026-09-27_merged_decisions-then-subagents_sent-back | accept | send_back | 1 | 12 | 3 | 0.84 | 1.5 |
 | 2026-09-27_ratelimit-demo_verified | audit | accept | 0 | 9 | 0 | 0.83 | 10.4 |
 | 2026-09-27_subagents_main-submitted_sent-back-at-cap | send_back | send_back | 1 | 19 | 1 | 1.50 | 4.2 |
 | 2026-09-27_subagents_subagent-verified_main-at-cap | none | none | 0 | 14 | 2 | 1.01 | 1.6 |

@@ -1,9 +1,11 @@
 """Evidence collection: what changed, a fresh test run, sabotage probes, and checkpoints."""
+import io
 import os
 import re
 import shutil
 import subprocess
 import tempfile
+import tokenize
 from pathlib import Path
 
 
@@ -182,17 +184,33 @@ def fail_before(root, base, changes_, cmd, timeout=120):
             "on_code_before_change": "pass" if r["passed"] else "fail", "tail": r["tail"][-3:]}
 
 
+def string_lines(text):
+    """Line numbers a multi-line string spans, such as a docstring's prose. Real Bob, Sept 27 (subagents, $2.03):
+    "allowed (returns True)" in a docstring became "allowed (returns False)", survived every round because no
+    test can catch it, and Bob spent its turns trying to kill it."""
+    rows = set()
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+            if tok.type == tokenize.STRING and tok.end[0] > tok.start[0]:
+                rows.update(range(tok.start[0], tok.end[0] + 1))
+    except (tokenize.TokenError, SyntaxError):  # a file that doesn't parse: mutate its lines as before
+        pass
+    return rows
+
+
 def plan_mutants(root, changes_, max_mutants=4):
-    """(path, lineno, original line, mutated line) for up to `max_mutants` changed, non-test source lines."""
+    """(path, lineno, original line, mutated line) for up to `max_mutants` changed, non-test source lines, leaving
+    out comments, definitions, imports and the prose of multi-line strings."""
     plan = []
     for path, c in changes_.items():
         if is_test(path) or not path.endswith(".py"):
             continue
         lines = (Path(root) / path).read_text(encoding="utf-8").splitlines(keepends=True)
+        prose = string_lines("".join(lines))
         for lineno, text in c["added"]:
             if len(plan) >= max_mutants:
                 return plan
-            if SKIP.match(text) or lineno < 1 or lineno > len(lines):
+            if SKIP.match(text) or lineno in prose or lineno < 1 or lineno > len(lines):
                 continue
             for pat, rep in MUTATORS:
                 mutated = re.sub(pat, rep, lines[lineno - 1], count=1)

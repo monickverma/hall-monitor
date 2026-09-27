@@ -75,8 +75,9 @@ def real_run(hm):
         elif e.get("stage") == "receipts" and not e.get("agent"):
             e["agent"] = caller
     ev_main = [e for e in ev if e.get("stage") != "receipts" or e.get("agent") in (None, "main")]
-    rounds = [e for e in ev_main if e.get("stage") == "receipts" and e.get("source") != "stop"] or \
-        [e for e in ev_main if e.get("stage") == "receipts"]
+    # The task's rounds as the Hall Pass reads them (receipts.task_rounds), the Stop hook's included. Real Bob
+    # re-run, Sept 27 (subagents): its Hall Pass said STUCK; the scorecard skipped that round and said sent back.
+    rounds = [e for e in ev_main if e.get("stage") == "receipts"]
     judged = [e for e in ev if e.get("stage") in ("intent", "step", "plan", "spawn")]  # as report.py counts them
     stops = [e for e in judged if e.get("action") in ("block", "ask_human", "restate")]
     # A stop was later allowed if a step on its target (an intent's targets are "a, b") was allowed AFTER it:

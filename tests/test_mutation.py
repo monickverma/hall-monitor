@@ -170,3 +170,16 @@ def test_sabotage_falls_back_to_the_working_tree_when_the_copy_cannot_pass(repo)
     sab = gitutil.sabotage(repo.root, changes, "python -m pytest -q", max_mutants=4)
     assert sab["mutants"] == 4 and [m["line"] for m in sab["survived"]] == [10, 11, 12]
     assert tree_hash(repo.root) == before  # restored after each in-place mutant, as before v4.2
+
+
+def test_sabotage_leaves_the_prose_of_a_docstring_alone(tmp_path):
+    """Real Bob re-run, Sept 27 (subagents, $2.03): a mutant in a docstring's prose survived every round."""
+    (tmp_path / "app").mkdir()
+    src = ('def check_rate_limit(user):\n    """The first 5 attempts in a minute are\n'
+           '    allowed (returns True); the 6th and beyond are denied (returns False).\n    """\n'
+           '    return len(seen[user]) < 5\n')
+    (tmp_path / "app" / "ratelimit.py").write_text(src, encoding="utf-8")
+    changes = {"app/ratelimit.py": {"added": list(enumerate(src.splitlines(), 1))}}
+    assert [(n, to.strip()) for _, n, _, to in gitutil.plan_mutants(tmp_path, changes, 10)] == \
+        [(5, "return len(seen[user]) <= 5")]
+    assert gitutil.string_lines("x = 1 +\n") == set()  # a file that doesn't parse is mutated as before

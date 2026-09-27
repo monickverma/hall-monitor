@@ -92,6 +92,8 @@ LEVEL 5 → LEVEL 0  CROSS-SESSION LESSONS
 | **Declared intents, via MCP** | Bob's hook payload is only `{tool, input}` (per the official docs); hooks never see Bob's reasoning, so rationalizations were invisible |
 | **Revoke an intent when its edit does something else** | A burned "add rate-limit check" intent stayed active and made a later, legitimate subagent look like it conflicted |
 | **Limits vs obligations** | "Every change needs a test" was checked on single edits and blocked everything |
+| **A rule about one kind of code applies only when the change touches it** | "Password comparison must use a constant-time algorithm" came back "needs evidence" on a rate-limit change because its edits to `login(user, password)` mention `password`. The task ended STUCK. A subject that names an operation ("comparison") now needs a changed line, outside the tests, that does it |
+| **A rule that needs evidence twice on the same diff goes to the user** | Resubmitting can't settle it, so each round used up a send-back until the task was STUCK |
 | **`max`, not noisy-or, across decisions** | Many weak "maybe" answers added up to a confident false violation |
 | **Uncertainty band 0.2–0.8** | Jev's 0.1–0.16 baseline noise on high-harm risks triggered needless escalations |
 | **Conflicts → note, not block** | Conflict detection is low-precision (SID paper: 27.9%); weak conflicts now get a note naming the other agent's work |
@@ -121,7 +123,7 @@ Numbers from `eval/summary.json` (n=60 claims, 10 variants).
   1. Sent back: "wired into login()" contradicted by the diff (`diff_mismatch`), and "tests verify the limit" and rule D3 contradicted by surviving sabotage mutants.
   2. Sent back as `stale`: every claim cited a test run made before the last edit.
   3. All 6 claims verified against fresh receipts; 5/5 sabotage mutants caught.
-- **Claim verification eval** (n=60 claims, 10 variants): 21/22 false claims caught; 2 false alarms out of 38 true claims (1 and 2 in two runs with fail-before evidence; 1 to 5 in seven runs before it); agreement 57/60; Brier score 0.0389. Certified tier (threshold 0.5): 24 accepted, 1 wrong, upper bound 0.15 at 90% confidence (n=33).
+- **Claim verification eval** (n=60 claims, 10 variants): 21/22 false claims caught; 2 false alarms out of 38 true claims (1, 2 and 2 in three runs with fail-before evidence; 1 to 5 in seven runs before it); agreement 57/60; Brier score 0.0349. Certified tier (threshold 0.5): 25 accepted, 1 wrong, upper bound 0.15 at 90% confidence (n=35).
 - **Cost:** about 61k Jev input tokens, about **$0.0025** for the whole session; about 60 seconds including every test run and sabotage probe (run of Sept 27).
 
 ## 5. Confirmed in real Bob (IDE 2.2.0, Bob Shell 2.0.5)

@@ -118,7 +118,75 @@ def test_a_rule_about_code_the_change_touches_is_judged(tmp_path, monkeypatch):
                                "removed": 1, "removed_lines": ["    return hmac.compare_digest(expected, given)"]}}
     assert receipts.not_applicable(PASSWORD_RULE, [], changed) is None  # a removed line counts too
     change(store, "from app.rl import limit\n\ndef test_limit():\n    assert limit() == 5\n")
-    (store.root / "app/rl.py").write_text("def limit(password=''):\n    return 5\n", encoding="utf-8")
+    (store.root / "app/rl.py").write_text("def limit(password=''):\n    return 5 if password != 'x' else 0\n",
+                                          encoding="utf-8")
     EV.record({"tool": "write_file", "input": {"path": "app/rl.py", "content": "..."}}, store)
     rows = receipts.verify(store, [{"claim": "Raised the limit in app/rl.py.", "evidence": ["E1"]}])["rows"]
     assert next(r for r in rows if "D2" in r["claim"])["tier"] != "code"  # it applies now: judged on evidence
+
+
+def test_a_line_that_mentions_passwords_but_compares_nothing_doesnt_apply_the_rule():
+    """Real Bob re-run, Sept 27 (subagents, $2.03): D2 came back "needs evidence" three rounds running. Bob's edit to
+    login(user, password) touched lines that mention `password`, and its tests compare login()'s results with ==."""
+    changed = {"app/service.py": {"status": "modified", "removed": 2, "added": [
+        (1, "from app.ratelimit import check_rate_limit"), (4, "def login(user: str, password: str) -> str:"),
+        (5, "    if not check_rate_limit(user):"), (6, '        return "rate_limited"'),
+        (7, "    if not check_password(user, password):")],
+        "removed_lines": ["def login(user: str, password: str) -> str:", "    if not check_password(user, password):"]},
+        "tests/test_service.py": {"status": "modified", "removed": 0, "removed_lines": [],
+                                  "added": [(12, '    assert login("alice", "wrong password") == "denied"')]},
+        "app/ratelimit.py": {"status": "new", "removed": 0, "removed_lines": [],
+                             "added": [(9, "    if len(q) >= 5:"), (10, "        return False")]}}
+    assert receipts.untouched_subject(PASSWORD_RULE, changed) == "Password comparison"
+    assert receipts.not_applicable(PASSWORD_RULE, [], changed)[1] == "not_applicable"
+    for rule in (RULE, "Tests must assert on the specific changed behavior; tests that only exercise the happy path "
+                       "or unrelated behavior do not satisfy the testing requirement."):  # D4 and D5 always apply
+        assert receipts.untouched_subject(rule, changed) is None, rule
+
+
+def test_a_new_comparison_in_password_code_applies_the_rule(tmp_path):
+    """The comparison names no password, but the file it's in is about passwords."""
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "auth.py").write_text(
+        "def check_password(user, password):\n    given = digest(password)\n    if given != expected(user):\n"
+        "        return False\n    return True\n", encoding="utf-8")
+    changed = {"app/auth.py": {"status": "modified", "removed": 0, "removed_lines": [],
+                               "added": [(3, "    if given != expected(user):"), (4, "        return False")]}}
+    assert receipts.untouched_subject(PASSWORD_RULE, changed) == "Password comparison"  # the lines alone don't say
+    assert receipts.untouched_subject(PASSWORD_RULE, changed, tmp_path) is None
+    ratelimit = {"app/ratelimit.py": {"status": "new", "removed": 0, "removed_lines": [],
+                                      "added": [(1, "def allow(user):"), (2, "    return len(seen[user]) != 5")]}}
+    assert receipts.untouched_subject(PASSWORD_RULE, ratelimit, tmp_path) == "Password comparison"
+
+
+def test_a_rule_that_needs_evidence_twice_on_the_same_diff_goes_to_the_user(tmp_path, monkeypatch):
+    """Real Bob re-run, Sept 27 (subagents, $2.03): D2 came back "needs evidence" in three rounds, the last two on
+    the same diff, and the task ended STUCK. Resubmitting can't settle it, so the second time it's a question for the
+    user and doesn't use up a send-back. A changed diff is a new attempt."""
+    from hallmonitor import report
+    unsure = lambda qid, state: ("says_nothing", 0.9) if "D2" in state["claim"] else ("supports", 0.97)  # noqa: E731
+    monkeypatch.setattr(jev, "ask", FakeJev(verdict=unsure))
+    store = repo(tmp_path)
+    store.add_decision(PASSWORD_RULE, "docs/security-policy.pdf §2", kind="obligation")
+    change(store, "from app.rl import limit\n\ndef test_limit():\n    assert limit() == 5\n")
+    (store.root / "app/rl.py").write_text("def limit(password=''):\n    return 5 if password != 'x' else 0\n",
+                                          encoding="utf-8")
+    EV.record({"tool": "write_file", "input": {"path": "app/rl.py", "content": "..."}}, store)
+    claims = [{"claim": "Raised the limit in app/rl.py.", "evidence": ["E1"]}]
+
+    def d2(result):
+        return next(r for r in result["rows"] if "D2" in r["claim"])
+    first = receipts.verify(store, claims)
+    assert (first["status"], first["send_backs"], d2(first)["state"]) == ("send_back", 1, "needs_evidence")
+    for _ in range(2):  # the same diff: asked, not sent back
+        again = receipts.verify(store, claims)
+        assert (again["status"], again["send_backs"]) == ("audit", 1)
+        assert (d2(again)["state"], d2(again)["code"]) == ("cant_check", "ask_user")
+        assert "Ask the user whether the finished work satisfies it." in receipts.message(again)
+        assert "need the user's answer" in receipts.message(again)
+    assert "receipts: ASKS YOU" in report.write_hall_pass(store)[1]
+    (store.root / "app/rl.py").write_text("def limit(password=''):\n    return 5 if password != 'y' else 0\n",
+                                          encoding="utf-8")
+    EV.record({"tool": "write_file", "input": {"path": "app/rl.py", "content": "..."}}, store)
+    changed = receipts.verify(store, claims)
+    assert (changed["status"], changed["send_backs"], d2(changed)["state"]) == ("send_back", 2, "needs_evidence")
