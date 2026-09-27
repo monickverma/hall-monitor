@@ -87,17 +87,17 @@ def changes(root, base):
     return out
 
 
-def diff_text(changes_, max_chars=3500, max_lines=60):
-    # Real Bob, Sept 27: Jev never saw most of a long doc edit, so true claims about it came back "says
-    # nothing". Say what's left out, so a cut is never read as an absence. (A 200-line cap with a 6,000-char
-    # Receipts budget raised seeded false alarms to 5/38, so the caps stay where they were.)
+def diff_text(changes_, max_chars=3500, max_lines=200):
+    # Real Bob, Sept 27: at 60 lines per file, Jev never saw most of a long doc edit, so true claims about
+    # it came back "says nothing". Say what's left out, so a cut is never read as an absence.
+    # An added line numbered None is a marker a caller put in (receipts' excerpts), shown as is.
     parts = []
     for path, c in changes_.items():
         added = c["added"]
-        body = "\n".join(f"+{t}" for _, t in added[:max_lines])
+        body = "\n".join(t if n is None else f"+{t}" for n, t in added[:max_lines])
         if len(added) > max_lines:
             body += f"\n[... {len(added) - max_lines} more added lines not shown]"
-        parts.append(f"--- {path} ({c['status']}, +{len(added)} -{c['removed']})\n{body}")
+        parts.append(f"--- {path} ({c['status']}, +{c.get('total_added', len(added))} -{c['removed']})\n{body}")
     text = "\n".join(parts)
     if len(text) > max_chars:
         text = text[:max_chars] + f"\n[... {len(text) - max_chars} more characters of the diff not shown]"

@@ -131,15 +131,61 @@ def next_round(send_backs, status, limit):
     return send_backs, status
 
 
-def _relevant_diff(changes, claim, budget=2500):
-    """Put files the claim mentions first, so the evidence the claim is about survives truncation."""
+# How much diff Jev sees per claim. Real Bob, Sept 27: at 2,500 characters (and 60 lines per file in
+# gitutil.diff_text) true claims about a long doc edit came back "says nothing", and the docs task ended
+# STUCK. When a diff is still too long, _relevant_diff shows the lines the claim is about. The seeded eval
+# never cuts a diff (its largest is 1,816 characters), so tests/test_evidence.py pins this with a long
+# edit. A deep look at 12,000 gave 3 "can't check" verdicts.
+FOCUSED_DIFF_BUDGET = 6000
+DEEP_DIFF_BUDGET = 7000
+
+
+WORD_RE = re.compile(r"[a-z_][a-z0-9_]{3,}")
+STOPWORDS = {"that", "this", "with", "from", "into", "each", "every", "when", "then", "than", "have", "been",
+             "were", "which", "there", "their", "they", "them", "what", "also", "only", "more", "must", "does",
+             "done", "made", "added", "adds", "updated", "changed", "file", "files", "line", "lines", "now",
+             "section", "sections", "should", "will", "would", "about", "after", "before", "under", "over"}
+EXCERPT_OVER = 20  # a file with more added lines than this is excerpted when the diff doesn't fit
+
+
+def _excerpt(c, words, context=1, max_hits=40):
+    """A long file edit cut down to the added lines that share words with the claim (a line of context
+    either side), after its first lines. Each gap is marked, so a cut is never read as an absence."""
+    added = c["added"]
+    score = [len(words & set(WORD_RE.findall(t.lower()))) for _, t in added]
+    hits = [k for k, n in enumerate(score) if n]
+    if len(hits) > max_hits:  # common words: keep the lines that share the most
+        floor = sorted((score[k] for k in hits), reverse=True)[max_hits - 1]
+        hits = [k for k in hits if score[k] >= floor][:max_hits]
+    keep = sorted(set(range(min(5, len(added))))
+                  | {j for k in hits for j in range(k - context, k + context + 1) if 0 <= j < len(added)})
+    rows, prev = [], -1
+    for j in keep:
+        if j > prev + 1:
+            rows.append((None, f"[... {j - prev - 1} added lines not shown]"))
+        rows.append(added[j])
+        prev = j
+    if prev < len(added) - 1:
+        rows.append((None, f"[... {len(added) - 1 - prev} added lines not shown]"))
+    return {**c, "added": rows, "total_added": len(added)}
+
+
+def _relevant_diff(changes, claim, budget=FOCUSED_DIFF_BUDGET):
+    """Put files the claim mentions first, so the evidence the claim is about survives truncation. When
+    the diff still doesn't fit, show the lines of each long edit that the claim is about (real Bob, Sept 27:
+    a true claim about a README section 100 lines down came back "says nothing")."""
     words = set(re.findall(r"[A-Za-z_][\w./]*", claim.lower()))
 
     def mentioned(path):
         stem = path.lower().rsplit("/", 1)[-1]
         return path.lower() in words or stem in words or stem.split(".")[0] in words
     ordered = dict(sorted(changes.items(), key=lambda kv: not mentioned(kv[0])))
-    return gitutil.diff_text(ordered, budget)
+    text = gitutil.diff_text(ordered, budget)
+    if "not shown]" not in text:
+        return text
+    key = {w for w in WORD_RE.findall(claim.lower()) if w not in STOPWORDS}
+    return gitutil.diff_text({f: _excerpt(c, key) if len(c["added"]) > EXCERPT_OVER else c
+                              for f, c in ordered.items()}, budget)
 
 
 def _receipt_view(r):
@@ -227,7 +273,7 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
     def verdict_job(i, deep=False):
         c = claims[i]
         scope = {f: ch for f, ch in changes.items() if f in c["named"]} or changes
-        diff = _relevant_diff(scope, c["claim"], 7000 if deep else 2500)
+        diff = _relevant_diff(scope, c["claim"], DEEP_DIFF_BUDGET if deep else FOCUSED_DIFF_BUDGET)
         if c["cited"] and not c.get("uncited_fallback"):
             ev = {"cited_receipts": [_receipt_view(ledger[x]) for x in c["cited"]],
                   "fresh_test_run": tests, "diff": diff}

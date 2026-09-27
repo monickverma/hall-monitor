@@ -220,12 +220,28 @@ def test_review_pilot_scores_each_condition(tmp_path):
 
 
 def test_diff_text_says_what_it_leaves_out():
-    """Real Bob, Sept 27: at 60 lines per file, Jev never saw most of a long doc edit, and nothing said so."""
+    """Real Bob, Sept 27: at 60 lines per file, Jev never saw most of a long doc edit."""
     from hallmonitor import gitutil
     changes = {"README.md": {"status": "modified", "added": [(i, f"line {i}") for i in range(250)], "removed": 3}}
     text = gitutil.diff_text(changes, max_chars=100000)
-    assert "+line 59\n" in text and "+line 60\n" not in text and "[... 190 more added lines not shown]" in text
+    assert "+line 199\n" in text and "+line 200\n" not in text and "[... 50 more added lines not shown]" in text
     assert gitutil.diff_text(changes, max_chars=500).endswith("more characters of the diff not shown]")
+
+
+def test_a_long_doc_edit_reaches_jev():
+    """Real Bob, Sept 27: a true claim about line 100 of a README edit came back "says nothing", because
+    Receipts showed Jev 60 lines and 2,500 characters. The seeded eval never cuts a diff, so pin it here."""
+    from hallmonitor import gitutil, receipts
+    lines = [f"Paragraph {i}: Hall Monitor supervises each step Bob takes and records it." for i in range(120)]
+    lines[100] = "Receipts: every claim cites E-IDs from list_evidence, checked by code, then by Jev."
+    changes = {"README.md": {"status": "modified", "added": list(enumerate(lines)), "removed": 40},
+               "app/service.py": {"status": "modified", "added": [(1, "limiter.check(user)")], "removed": 0}}
+    claim = "README.md now explains that every claim cites E-IDs from list_evidence."
+    assert lines[100] not in gitutil.diff_text(changes, receipts.FOCUSED_DIFF_BUDGET)  # a plain cut misses it
+    for budget in (receipts.FOCUSED_DIFF_BUDGET, receipts.DEEP_DIFF_BUDGET):
+        shown = receipts._relevant_diff(changes, claim, budget)
+        assert lines[100] in shown and "limiter.check(user)" in shown
+        assert "--- README.md (modified, +120 -40)" in shown and "added lines not shown]" in shown
 
 
 def test_collect_only_is_not_a_test_run():
