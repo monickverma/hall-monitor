@@ -5,7 +5,7 @@ import subprocess
 import pytest
 
 from hallmonitor import evidence as EV, hook, jev, mcp_server, receipts, step
-from hallmonitor.store import Store, is_protected
+from hallmonitor.store import Store, is_protected, rel_path
 
 
 def git(root, *args):
@@ -163,3 +163,48 @@ def test_edit_under_approved_intent_skips_on_task_and_clashes(repo, monkeypatch)
     assert not any(q.startswith("conflict_") or q == "on_task" for q in asked[-1])
     assert "matches_intent" in asked[-1]
     assert not [e for e in store.events() if e.get("stage") == "error"]
+
+
+# ---------------------------------------------------------------- paths as Bob sends them
+
+def test_paths_are_compared_repo_relative(repo):
+    for path in (str(repo / "app" / "service.py"), "app\\service.py", "./app/service.py", "app/../app/service.py"):
+        assert rel_path(repo, path) == "app/service.py", path
+    assert rel_path(repo, "service.py", base=repo / "app") == "app/service.py"  # from a subfolder
+    assert is_protected(repo, rel_path(repo, "../.bob/x.json", base=repo / "app"))  # still caught once resolved
+
+
+def test_absolute_tool_path_matches_a_relative_declared_file(repo, monkeypatch):
+    """Bob's edit tools send absolute paths while declare_intent gets relative ones (preflight, Sept 27):
+    the edit must be judged under the declared intent, not blocked for a missing one."""
+    store = Store(repo)
+    store.add_intent({"agent": "main", "intent": "edit login", "files": ["app/service.py"], "commands": [],
+                      "verdict": "approved", "why": ""})
+    asked = []
+    monkeypatch.setattr(jev, "ask", fake_low_risk(asked))
+    absolute = str(repo / "app" / "service.py")
+    code, _, err = step.pre_tool({"tool": "apply_diff", "cwd": str(repo), "input": {"path": absolute, "diff": "x"}},
+                                 store)
+    assert code == 0, err
+    assert "matches_intent" in asked[-1]
+    EV.record({"tool": "apply_diff", "cwd": str(repo), "input": {"path": absolute, "diff": "x"}}, store)
+    assert store.evidence()[-1]["file"] == "app/service.py"  # receipts match claims against this name
+
+
+def test_stop_backstop_leaves_verified_work_alone(repo, monkeypatch):
+    """Bob's last message reaches the Stop hook (probe, Sept 27). Judging a recap of verified work again put
+    NEEDS EVIDENCE over VERIFIED (preflight, Sept 27); edits no accepted submission covers are still judged."""
+    store = Store(repo)
+    monkeypatch.setattr(jev, "ask", never)
+    judged = []
+    monkeypatch.setattr(receipts, "verify", lambda s, text, **k: judged.append(k.get("source")) or {"status": "accept"})
+    s = store.session()
+    s["edit_seq"], s["verified_edit_seq"] = 2, 2
+    store.save_session(s)
+    assert receipts.stop_hook(store, "Done: added the docstring, and 2 tests passed.") == (0, "", "")
+    assert judged == []
+    s = store.session()
+    s["edit_seq"] = 3  # an edit after the verified submission
+    store.save_session(s)
+    receipts.stop_hook(store, "Done again.")
+    assert judged == ["stop"]

@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 from . import evidence, jev, payload as P, policy, questions as Q
-from .store import is_protected
+from .store import is_protected, rel_path
 
 
 def _read(root, path, limit=3000):
@@ -126,7 +126,7 @@ def declare_intent(store, intent, files=(), commands=(), agent="main", agent_tas
     (Pending notes and flags are put in front of every MCP result by the MCP server.)"""
     t0 = time.time()
     cfg, sess = store.config(), store.session()
-    files = [str(f).replace("\\", "/") for f in files or []]
+    files = [rel_path(store.root, f) for f in files or []]
     commands = list(commands or [])
     target = ", ".join(files + commands)
     base = {"agent": agent, "agent_task": agent_task, "intent": intent, "files": files, "commands": commands}
@@ -184,11 +184,11 @@ def pre_tool(p, store):
     cfg, sess = store.config(), store.session()
     tool = P.tool(p)
     path, command, detail_text = P.describe(tool, P.tool_input(p))
-    rel = str(path).replace("\\", "/") if path else None
+    rel = rel_path(store.root, path, base=P.first(p, "cwd")) if path else None
 
     if tool in P.SPAWN_TOOLS:
         return spawn_check(p, store)
-    if rel and tool in P.EDIT_TOOLS and is_protected(store.root, rel, base=P.first(p, "cwd")):
+    if rel and tool in P.EDIT_TOOLS and is_protected(store.root, rel):  # rel is already resolved against cwd
         store.log({"stage": "step", "tool": tool, "target": rel, "action": "block",
                    "note": "protected: Hall Monitor's own configuration and records"})
         return 2, "", ("Hall Monitor: .bob/ and .hallmonitor/ hold Hall Monitor's own configuration and records, "
@@ -261,7 +261,8 @@ def spawn_check(p, store):
     inp = P.tool_input(p)
     brief_text, kind = P.subagent_brief(inp)
     n = sum(1 for it in store.session()["intents"] if it.get("source") == "spawn") + 1
-    name = P.first(inp, "name", "title", default=None) or f"{kind}-subagent-{n}"
+    # Bob's `name` is the preset, shared by parallel subagents, so number them to keep their work apart
+    name = P.first(inp, "title", default=None) or f"{kind}-subagent-{n}"
     action = {"tool": "spawn_subagent", "subagent_type": kind, "brief": brief_text[:1500]}
     try:
         d, det = judge(store, action, reason=brief_text, agent=name, agent_task=brief_text)

@@ -79,8 +79,9 @@ def exit_code(p):
 
 
 def subagent_brief(inp):
-    """(brief, preset) from a spawn_subagent input; field names are unverified, so accept several."""
+    """(brief, preset) from a spawn_subagent input. Bob 2.2.0 sends {name, description}, where `name` is
+    the preset ("explore", "general"), not a unique name (probe, Sept 27); other shapes are still accepted."""
     brief = text_of(first(inp, "task", "prompt", "instructions", "description", "message", "query",
                           "objective", default="")) or json.dumps(inp)[:1500]
-    kind = str(first(inp, "type", "subagent_type", "preset", "agent_type", default="general")).lower()
+    kind = str(first(inp, "type", "subagent_type", "preset", "agent_type", "name", default="general")).lower()
     return brief, kind

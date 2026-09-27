@@ -30,6 +30,25 @@ def _get():
     return _client
 
 
+def load_key_from_user_env():
+    """Bob starts the MCP server without the user's environment: in the probe (Sept 27), TYPESAFE_API_KEY
+    set in the shell that ran `bob run` never reached it. On Windows, read the key from where `setx`
+    saved it, so it still never goes in a file. Called by the entry scripts Bob launches, not by tests."""
+    if os.environ.get("TYPESAFE_API_KEY") or os.name != "nt":
+        return
+    import winreg
+    for hive, sub in ((winreg.HKEY_CURRENT_USER, "Environment"),
+                      (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")):
+        try:
+            with winreg.OpenKey(hive, sub) as k:
+                key = winreg.QueryValueEx(k, "TYPESAFE_API_KEY")[0]
+        except OSError:
+            continue
+        if key:
+            os.environ["TYPESAFE_API_KEY"] = key
+            return
+
+
 def ask(state, questions, retries=3):
     """Ask every question over one state in a single parallel request.
 
