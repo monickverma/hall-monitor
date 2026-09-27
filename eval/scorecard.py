@@ -248,6 +248,18 @@ V4_TASKS = {
 }
 
 
+# The evidence each mechanism should reach: E4 (seen in real Bob) for everything that runs inside Bob; the offline
+# evals are measured by design (E3); the review sheets need people's answers (E5).
+TARGET = {"(a) seeded variants with known truth": "E3", "(b) caught, false alarms, agreement, Brier": "E3",
+          "(c) control set of 10 must-block and 10 must-allow": "E3",
+          "(d) review sheets for people, with and without Hall Monitor": "E5"}
+ORDER = ["missing", "E0", "E1", "E3", "E4", "E5"]
+
+
+def at_target(label, level):
+    return ORDER.index(level) >= ORDER.index(TARGET.get(label, "E4"))
+
+
 # eval mechanisms: the file their measured result lives in ("people": filled in by reviewers)
 MEASURED = {"(a) seeded variants with known truth": "eval/results.json",
             "(b) caught, false alarms, agreement, Brier": "eval/summary.json",
@@ -309,14 +321,16 @@ def render(ev):
     out += [f"| {r['name']} | {r['first']} | {r['final']} | {r['send_backs']} | {r['judged']} | {r['stops']} | "
             f"{money(r['bob_usd'])} | {r['minutes']:.1f} |" for r in ev["runs"]]
     out += ["", "## v4 tasks (T1-T6): built, tested, seen in real Bob", "",
-            "| Task | Built | Seen in real Bob | Mechanisms (evidence) |", "|---|---|---|---|"]
+            "Target: E4 (seen in real Bob) for what runs inside Bob, E3 (measured) for the offline evals, E5 "
+            "(people's answers) for the review sheets.", "",
+            "| Task | Built | At target | Mechanisms (evidence / target) |", "|---|---|---|---|"]
     rows = task_rows(ev.get("run_dirs", []))
     for task in V4_TASKS:
         mine = [r for r in rows if r[0] == task]
         built = sum(r[2] != "missing" for r in mine)
-        real = sum(r[2] == "E4" for r in mine)
-        out.append(f"| {task} | {built}/{len(mine)} | {real}/{len(mine)} | "
-                   + "; ".join(f"{label} ({level})" for _, label, level in mine) + " |")
+        done = sum(at_target(label, level) for _, label, level in mine)
+        out.append(f"| {task} | {built}/{len(mine)} | {done}/{len(mine)} | "
+                   + "; ".join(f"{label} ({level}/{TARGET.get(label, 'E4')})" for _, label, level in mine) + " |")
     out += ["", "## Submission evidence", ""]
     out += [f"- [{'x' if ok else ' '}] {k}" for k, ok in ev["submission"].items()]
     return "\n".join(out) + "\n"

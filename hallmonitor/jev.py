@@ -7,7 +7,7 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from typesafe_sdk import TypeSafeClient, TypeSafePermissionDeniedError
+from typesafe_sdk import TypeSafeAuthenticationError, TypeSafeClient, TypeSafeError, TypeSafePermissionDeniedError
 
 CALIBRATED_MODEL = "jev-1.13.0"  # the harm weights, thresholds, control set and eval/ results were tuned on this
 # HM_JEV_MODEL exists for re-calibrating a new model (run eval/control_set.py and eval/seeded.py with it).
@@ -20,7 +20,8 @@ _client = None
 
 
 class JevRefused(Exception):
-    """Jev answered HTTP 403 (a content block, or a key problem). Callers fall back to code-only rules."""
+    """Jev can't answer: HTTP 403 (a content block), a missing, wrong or expired key (401), or an outage that
+    outlasted the retries. Callers fall back to code-only rules."""
 
 
 def _get():
@@ -63,9 +64,17 @@ def ask(state, questions, retries=3):
             return r["answers"], {**r["usage"], "model": r.get("model") or MODEL}
         except TypeSafePermissionDeniedError as e:
             raise JevRefused(str(e)) from e  # retrying a content block only repeats it
-        except Exception:
+        except (TypeSafeAuthenticationError, TypeSafeError) as e:
+            if type(e) in (TypeSafeAuthenticationError, TypeSafeError):  # a missing, wrong or expired key
+                # Before, this was retried and then raised as-is: the hooks' catch-all let every edit through
+                # unchecked (fail_open), so a key problem quietly switched supervision off.
+                raise JevRefused(f"Jev can't be reached with this key: {e}") from e
             if attempt == retries - 1:
-                raise
+                raise JevRefused(f"Jev is unavailable: {e}") from e
+            time.sleep(1.5 * 2 ** attempt)
+        except Exception as e:
+            if attempt == retries - 1:  # an outage: fall back to code-only rules, like a refusal
+                raise JevRefused(f"Jev is unavailable: {e}") from e
             time.sleep(1.5 * 2 ** attempt)
 
 
