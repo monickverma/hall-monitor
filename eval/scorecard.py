@@ -33,9 +33,11 @@ RUBRIC = {
                             "and changed tests re-run on the code before the change"),
     "step monitor": (0.20, 7.5, "Least-harm judgment of every intent; excuses named; code rules before Jev"),
     "robustness in real Bob": (0.15, 5.5, "Single-agent tasks verify in the first round in real Bob (docs, "
-                                          "/decisions x2), and the fixes for 16 earlier false alarms held there. The "
-                                          "parallel-subagent task ran without a send-back in its last run, but the "
-                                          "main agent reached the $1 cost cap before submitting its claims"),
+                                          "/decisions x2), and the fixes for 16 earlier false alarms held there. In "
+                                          "the parallel-subagent task's latest run both subagents verified with no "
+                                          "false block and the main agent submitted, but it was sent back once (rule "
+                                          "D2 'needs evidence' though no password code changed) and reached the "
+                                          "$1.50 cost cap while answering"),
     "explainability": (0.10, 8, "Hall Pass built from the session's own log; says why a task stopped"),
     "rules and plan": (0.10, 7, "Policy PDF and prompt lines become rules; plan gate on PLAN.md"),
     "drift and stalls": (0.05, 6, "Named stall patterns and checkpoints; one real false stall, fixed"),

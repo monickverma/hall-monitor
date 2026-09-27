@@ -72,3 +72,11 @@ def test_a_result_after_an_error_line_is_still_read(tmp_path, monkeypatch):
     data = REAL_RUN(tmp_path, "supervised", "do the task", "0.30", "15", 60)
     assert data["status"] == "success" and data["stats"]["session_costs"] == 0.302264
     assert "cost limit" in data["error"] and data["last_message"].startswith("Receipts")
+
+
+def test_bob_is_started_by_its_resolved_path(tmp_path, monkeypatch):
+    """Windows, Sept 27: Bob Shell is npm's bob.cmd, which CreateProcess can't find from the bare name "bob"."""
+    calls = fake_bob(monkeypatch, stdout='{"status": "success", "stats": {}}')
+    monkeypatch.setattr(bob.shutil, "which", lambda name: "C:/npm/bob.CMD")
+    REAL_RUN(tmp_path, "supervised", "do the task", "1", "5", 60)
+    assert calls[-1][0] == "C:/npm/bob.CMD" and calls[-1][1] == "run"

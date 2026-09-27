@@ -14,9 +14,12 @@ import time
 
 
 def _run(root, mode, prompt, max_cost, max_turns, timeout):
-    if os.environ.get("HM_DISABLE_BOB_SHELL") or not shutil.which("bob"):
+    exe = None if os.environ.get("HM_DISABLE_BOB_SHELL") else shutil.which("bob")
+    if not exe:
         return None
-    cmd = ["bob", "run", "--mode", mode, "--format", "json", "--max-cost", str(max_cost),
+    # The resolved path, not "bob": on Windows Bob Shell is npm's bob.cmd, and CreateProcess won't find a .cmd
+    # from a bare name, so every local `bob run` failed as "bob not on PATH" (Sept 27).
+    cmd = [exe, "run", "--mode", mode, "--format", "json", "--max-cost", str(max_cost),
            "--max-turns", str(max_turns), "--workspace", str(root)]
     # On a fresh machine (a CI runner) `bob run` stops at IBM's license, and a "general" API key needs a
     # team id. Both are the operator's to give: Hall Monitor never accepts the license on its own.
