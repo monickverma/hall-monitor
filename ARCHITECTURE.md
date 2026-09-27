@@ -92,6 +92,8 @@ LEVEL 5 → LEVEL 0  CROSS-SESSION LESSONS
 | **Declared intents, via MCP** | Bob's hook payload is only `{tool, input}` (per the official docs); hooks never see Bob's reasoning, so rationalizations were invisible |
 | **Revoke an intent when its edit does something else** | A burned "add rate-limit check" intent stayed active and made a later, legitimate subagent look like it conflicted |
 | **Limits vs obligations** | "Every change needs a test" was checked on single edits and blocked everything |
+| **A rule about one kind of code applies only when the change touches it** | "Password comparison must use a constant-time algorithm" came back "needs evidence" on a rate-limit change because its edits to `login(user, password)` mention `password`. The task ended STUCK. A subject that names an operation ("comparison") now needs a changed line, outside the tests, that does it |
+| **A rule that needs evidence twice on the same diff goes to the user** | Resubmitting can't settle it, so each round used up a send-back until the task was STUCK |
 | **`max`, not noisy-or, across decisions** | Many weak "maybe" answers added up to a confident false violation |
 | **Uncertainty band 0.2–0.8** | Jev's 0.1–0.16 baseline noise on high-harm risks triggered needless escalations |
 | **Conflicts → note, not block** | Conflict detection is low-precision (SID paper: 27.9%); weak conflicts now get a note naming the other agent's work |

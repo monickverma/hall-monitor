@@ -121,6 +121,8 @@ def write_hall_pass(store):
     stamp = {"accept": ("ok", "VERIFIED"), "send_back": ("bad", "SENT BACK"), "audit": ("warn", "AUDITING"),
              "needs_evidence": ("warn", "NEEDS EVIDENCE"), "stuck": ("bad", "STUCK")}.get(
         status, ("warn", "IN PROGRESS"))
+    if status == "audit" and "ask_user" in (last_r[-1].get("codes") or {}).values():
+        stamp = ("warn", "ASKS YOU")  # a project rule Bob can't settle by resubmitting (receipts.verify)
     receipts_rows = store.evidence()
     cps = [r for r in receipts_rows if r["kind"] == "checkpoint"]
     ladder = Counter()

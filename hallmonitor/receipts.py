@@ -23,13 +23,17 @@ read-only Bob `explore` subagent audits the code -> Jev judges again with that a
 Stop rule: at most `max_send_backs` send-backs. The next one makes the task stuck, and Receipts names
 the checkpoint to restore. Hall Monitor never rolls back by itself. An uncited claim gets one free
 retry that doesn't count; after that, uncited claims are judged the old way and marked uncited.
+A project rule that comes back "needs evidence" again on an unchanged diff goes to the user as a question, and
+doesn't count as a send-back.
 
 Entry points: the MCP tool submit_claims, a write to CLAIMS.md (PreToolUse; inline "[E12]" citations
 count), and the Stop hook as a backstop.
 """
+import hashlib
 import json
 import re
 import time
+from pathlib import Path
 from . import fabricated as FB, mutation  # v4.2 fabricated files, extreme mutation
 
 from . import bob, brief, evidence as EV, gitutil, jev, policy, questions as Q
@@ -150,6 +154,11 @@ EVERY_CHANGE = set("""a an the all any each every new our your this that these t
     requests merge merges release releases branch branches diff diffs message messages documentation docs doc
     readme changelog""".split())
 COMMENT_RE = re.compile(r"(^|\s)#.*$|^\s*(//|/\*|\*).*$")  # `*` and `//` are Python operators mid-line
+# A subject word that names something code does, by its stem, and what a line doing it looks like. Real Bob,
+# Sept 27 (subagents, $2.03): the edit to login() touched lines that mention `password`, so "Password comparison
+# must use a constant-time algorithm" applied, came back "needs evidence" three rounds running, and the task
+# ended STUCK. That rule is about a line that compares something in code about passwords.
+OPERATIONS = {"compar": re.compile(r"==|!=|compare|\beq\(|__eq__")}
 
 
 def _stem(word):
@@ -159,36 +168,57 @@ def _stem(word):
     return word
 
 
-def untouched_subject(rule, changed):
-    """The words of a scoped rule's subject when no changed code line (added or removed, comments aside) and no
-    changed code file's path mentions any of them, else None. Real Bob, Sept 27: "Password comparison must use a
-    constant-time algorithm" came back "needs evidence" on a rate-limit change with no password code, and Bob
-    spent the rest of its cost cap answering it. A rule with no subject ("Do not add ...") or one about every
-    change ("Every behavior change must ship with a test") always applies."""
+def _text(root, path):
+    try:
+        return (Path(root) / path).read_text(encoding="utf-8", errors="replace").lower()
+    except OSError:
+        return ""
+
+
+def untouched_subject(rule, changed, root=None):
+    """The words of a scoped rule's subject when the change doesn't touch them, else None. Touched means a
+    changed code line (added or removed, comments aside) or a changed code file's path mentions one of them.
+    Real Bob, Sept 27: "Password comparison must use a constant-time algorithm" came back "needs evidence" on a
+    rate-limit change with no password code, and Bob spent the rest of its cost cap answering it. A rule with no
+    subject ("Do not add ...") or one about every change ("Every behavior change must ship with a test") always
+    applies.
+    A subject that names an operation (OPERATIONS: "comparison") is touched only by a changed line that does it,
+    outside the tests (a test's `==` checks a result), and that names the subject itself or sits in a file whose
+    path, changed lines or text under `root` mention the rest of it. So replacing
+    `hmac.compare_digest(expected, given)` with `expected == given` in app/auth.py touches it, and a rate-limit
+    line in login(user, password) doesn't."""
     m = SUBJECT_RE.match(rule)
-    words = [w for w in re.findall(r"[a-z]+", m[1].lower()) if w not in EVERY_CHANGE] if m else []
+    words = [_stem(w) for w in re.findall(r"[a-z]+", m[1].lower()) if w not in EVERY_CHANGE] if m else []
     if not words:
         return None
-    code = [(f, c) for f, c in changed.items() if not f.lower().endswith((".md", ".txt", ".rst", ".pdf"))]
-    text = "\n".join([f.lower() for f, _ in code] + [
-        COMMENT_RE.sub("", line).lower() for _, c in code
-        for line in [t for _, t in c["added"]] + list(c.get("removed_lines", []))])
-    if any(_stem(w) in text for w in words):
-        return None
+    lines = {f: [COMMENT_RE.sub("", t).lower() for t in [t for _, t in c["added"]] + list(c.get("removed_lines", []))]
+             for f, c in changed.items() if not f.lower().endswith((".md", ".txt", ".rst", ".pdf"))}
+    ops = [rx for k, rx in OPERATIONS.items() if any(w.startswith(k) for w in words)]
+    if not ops:
+        text = "\n".join([f.lower() for f in lines] + [t for ls in lines.values() for t in ls])
+        return None if any(w in text for w in words) else m[1].strip()
+    nouns = [w for w in words if not any(w.startswith(k) for k in OPERATIONS)]
+    for f, ls in lines.items():
+        doing = [] if gitutil.is_test(f) else [t for t in ls if all(rx.search(t) for rx in ops)]
+        if not doing:
+            continue
+        about = "\n".join([f.lower(), *ls, _text(root, f) if root else ""])
+        if not nouns or any(w in t for t in doing for w in words) or any(n in about for n in nouns):
+            return None
     return m[1].strip()
 
 
-def not_applicable(rule, files, changed):
+def not_applicable(rule, files, changed, root=None):
     """A rule about changes to certain files ("Changes to app/auth.py require a security review") holds when
     none of them changed. Real Bob, Sept 27: that rule came back "needs evidence" every round of a task that
     never touched app/auth.py, until the task was STUCK. So does a rule about one kind of code that the change
     doesn't touch (untouched_subject). Returns None when the rule does apply."""
     if files and CONDITIONAL_RE.search(rule) and not any(f in changed for f in files):
         return "verified", "not_applicable", f"{', '.join(files)} didn't change, so this rule doesn't apply."
-    subject = None if files else untouched_subject(rule, changed)
+    subject = None if files else untouched_subject(rule, changed, root)
     if subject:
         return ("verified", "not_applicable",
-                f"No changed code mentions {subject.lower()}, so this rule doesn't apply to this change.")
+                f"No changed code is about {subject.lower()}, so this rule doesn't apply to this change.")
     return None
 
 
@@ -390,7 +420,7 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
         c["where"] = named_files(c["claim"], known)
         about_rules = recorded_decisions(c["claim"], decisions) if c["from"] == "agent" else None
         if c["from"] == "ledger":
-            about_rules = not_applicable(c["rule"], named_files(c["rule"], known), all_changes)
+            about_rules = not_applicable(c["rule"], named_files(c["rule"], known), all_changes, store.root)
         cert = about_rules if c["from"] == "ledger" else about_rules or \
             certify(c["kind"], c["cited"], c["named"], all_changes, ledger, tests,
                     FB.unknown_files(store.root, sess.get("base"), c["claim"], known))  # v4.2 fabricated files
@@ -512,11 +542,27 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
     risky = [(st["change"]["file"], round(r[0]["risk"]["score"], 2))
              for (st, _), r in zip(risk_jobs, results[len(to_judge):]) if ok(r) and r[0]["risk"]["score"] >= 2.2]
 
+    # A project rule that came back "needs evidence" last round, on this same diff, can't be settled by Bob
+    # resubmitting: it goes to the user as a question, and doesn't use up a send-back. Real Bob, Sept 27
+    # (subagents, $2.03): D2 came back "needs evidence" in three rounds, the last two on the same diff, and the
+    # task ended STUCK.
+    diff_id = hashlib.sha1(json.dumps(all_changes, sort_keys=True).encode()).hexdigest()[:12]
+    before = sess["rules_needing_evidence"]
+    asked = [r for r in rows if claims[r["index"]]["from"] == "ledger" and r["state"] == "needs_evidence"
+             and before.get(r["claim"]) == diff_id]
+    for r in asked:
+        r.update(state="cant_check", code="ask_user", action="audit",
+                 detail="This rule came back \"needs evidence\" twice on the same diff, so resubmitting won't "
+                        "settle it. Ask the user whether the finished work satisfies it.")
+
     bad = [r for r in rows if r["action"] == "send_back"]
     free = bool(bad) and free_retry and all(r["code"] == "uncited" and r["tier"] == "code" for r in bad)
-    status = "needs_evidence" if free else "send_back" if bad else "audit" if audits or refused else "accept"
+    status = "needs_evidence" if free else "send_back" if bad else "audit" if audits or refused or asked else "accept"
 
     sess = store.session()
+    if agent == "main":  # the project's rules are checked on the main agent's rounds only
+        sess["rules_needing_evidence"] = {r["claim"]: diff_id for r in rows if claims[r["index"]]["from"] == "ledger"
+                                          and (r["state"] == "needs_evidence" or r["code"] == "ask_user")}
     if free:
         sess["uncited_retry_used"] = True
     # Each subagent has its own send-back count; the task's (main's) count is sess["send_backs"].
@@ -608,7 +654,8 @@ def message(result):
     out = [{"send_back": "Receipts: some claims are not backed by the evidence.",
             "needs_evidence": "Receipts: some claims don't cite their receipts yet. "
                               "This round doesn't count as a send-back.",
-            "audit": "Receipts: some claims need an independent audit.",
+            "audit": "Receipts: some claims need an independent audit." if result["audits"] else
+                     "Receipts: some claims need the user's answer.",
             "stuck": f"Receipts: STUCK. Claims have now been sent back {result['send_backs']} times. "
                      "Stop repairing and tell the user:"}[status]]
     for r in rows:
