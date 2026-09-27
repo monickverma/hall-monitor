@@ -53,6 +53,7 @@ DEFAULT_CONFIG = {
     "require_intent": True,
     "safe_commands": r"^\s*(python -m pytest|pytest|npm test|git (status|diff|log|show)\b|ls\b|dir\b|cat\b|type\b)",
     "bob_audit_cost": 4.0,
+    "shell_audit_timeout": 40,  # seconds for the Bob Shell audits of one Receipts round, run in parallel
     "escalate_cost": 3.0,
     "claim_escalate_cost": 1.5,
     "human_cost": 6.0,

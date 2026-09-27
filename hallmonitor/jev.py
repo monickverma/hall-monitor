@@ -31,25 +31,29 @@ def _get():
     return _client
 
 
-def load_key_from_user_env():
+def load_key_from_user_env(names=("TYPESAFE_API_KEY", "BOB_API_KEY")):
     """Bob starts the MCP server without the user's environment: in the probe (Sept 27), TYPESAFE_API_KEY
-    set in the shell that ran `bob run` never reached it. On Windows, read the key from where `setx`
-    saved it, so it still never goes in a file. Called by the entry scripts Bob launches, not by tests."""
-    if os.environ.get("TYPESAFE_API_KEY", "").startswith("${"):  # Bob leaves ${env:NAME} as is when NAME is unset
-        del os.environ["TYPESAFE_API_KEY"]
-    if os.environ.get("TYPESAFE_API_KEY") or os.name != "nt":
+    set in the shell that ran `bob run` never reached it. On Windows, read the keys from where `setx`
+    saved them, so they still never go in a file. BOB_API_KEY is for the Receipts auditor's own `bob run`
+    (bob.shell_audit): without it, every audit failed with "Bob API key is required" (Sept 27).
+    Called by the entry scripts Bob launches, not by tests."""
+    for name in names:
+        if os.environ.get(name, "").startswith("${"):  # Bob leaves ${env:NAME} as is when NAME is unset
+            del os.environ[name]
+    if os.name != "nt":
         return
     import winreg
-    for hive, sub in ((winreg.HKEY_CURRENT_USER, "Environment"),
-                      (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")):
-        try:
-            with winreg.OpenKey(hive, sub) as k:
-                key = winreg.QueryValueEx(k, "TYPESAFE_API_KEY")[0]
-        except OSError:
-            continue
-        if key:
-            os.environ["TYPESAFE_API_KEY"] = key
-            return
+    for name in [n for n in names if not os.environ.get(n)]:
+        for hive, sub in ((winreg.HKEY_CURRENT_USER, "Environment"),
+                          (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")):
+            try:
+                with winreg.OpenKey(hive, sub) as k:
+                    key = winreg.QueryValueEx(k, name)[0]
+            except OSError:
+                continue
+            if key:
+                os.environ[name] = key
+                break
 
 
 def ask(state, questions, retries=3):

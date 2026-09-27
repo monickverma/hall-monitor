@@ -10,7 +10,9 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import time
+from pathlib import Path
 
 
 def _run(root, mode, prompt, max_cost, max_turns, timeout):
@@ -32,8 +34,10 @@ def _run(root, mode, prompt, max_cost, max_turns, timeout):
         # stdin closed: a Bob Shell run that inherited an open stdin once hung before starting (Sept 27)
         r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
                            stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError:
         return None
+    except subprocess.TimeoutExpired:  # Bob Shell's own --max-cost/--max-turns still bound what it spends
+        return {"status": "timeout", "stats": {}, "error": f"no result within {timeout}s"}
     try:
         data = json.loads(r.stdout)
     except json.JSONDecodeError:
@@ -79,16 +83,28 @@ def _record(root, mode, prompt, data):
                              if k in stats}})
 
 
-def shell_audit(root, brief, max_cost="0.30", max_turns="8", timeout=240):
+def shell_audit(root, brief, max_cost="0.30", max_turns="8", timeout=40):
     """Audit one claim with the read-only Receipts Auditor mode. Returns the auditor's final message, or None
     when there's no audit to use: a run that failed before its task ran ("unparsed") leaves only its error
-    output, which must not count as an audit. Real Bob, Sept 27: Bob starts the MCP server without
-    BOB_API_KEY, so every audit ended with "Bob API key is required" and the supervised Bob audited instead."""
-    data = _run(root, "hm-auditor", brief, max_cost, max_turns, timeout)
+    output, and one that ran past `timeout` left none. Real Bob, Sept 27: Bob starts the MCP server without
+    BOB_API_KEY, so every audit ended with "Bob API key is required" and the supervised Bob audited instead.
+
+    The auditor works in a scratch copy of the repo that has its mode and skills (.bob/) but not Hall Monitor's
+    hooks (.bob/settings.json) or MCP server (.bob/mcp.json): a `bob run` in the supervised workspace would load
+    them, and its hooks would share and rewrite the supervised session's state while that session waits for
+    this audit. The copy also means the auditor can't change the evidence it audits."""
+    from . import gitutil
+    with tempfile.TemporaryDirectory(prefix="hm-audit-", ignore_cleanup_errors=True) as tmp:
+        gitutil.copy_tree(root, tmp)
+        if (Path(root) / ".bob").is_dir():  # the auditor's mode and skills, even where .bob/ is git-ignored
+            shutil.copytree(Path(root) / ".bob", Path(tmp) / ".bob", dirs_exist_ok=True)
+        for name in ("settings.json", "mcp.json"):
+            (Path(tmp) / ".bob" / name).unlink(missing_ok=True)
+        data = _run(tmp, "hm-auditor", brief, max_cost, max_turns, timeout)
     if not data:
         return None
     _record(root, "hm-auditor", brief, data)
-    if data.get("status") == "unparsed":
+    if data.get("status") in ("unparsed", "timeout"):
         return None
     return str(data.get("last_message") or "")[:3000] or None
 

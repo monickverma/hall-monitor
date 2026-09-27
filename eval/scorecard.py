@@ -92,6 +92,10 @@ def real_run(hm):
         parts = {t.strip() for t in str(s.get("target") or "").split(", ")}
         return any(j > at[id(s)] and t in parts for j, t in allows)
     stats = runs[-1].get("stats") or {}
+    # The Receipts auditor's own `bob run`s (bob.shell_audit) spend outside the supervised run's cost cap.
+    audits = sum((r.get("stats") or {}).get("session_costs") or 0
+                 for r in jsonl(hm / "bob_runs.jsonl") if r.get("mode") == "hm-auditor")
+    usd = stats.get("session_costs")
     return {"name": hm.parent.name, "final": rounds[-1]["action"] if rounds else "none",
             "first": rounds[0]["action"] if rounds else "none",
             "send_backs": sum(1 for r in rounds if r.get("action") in ("send_back", "stuck")),
@@ -102,7 +106,8 @@ def real_run(hm):
             "subagents": sum(1 for e in ev if e.get("stage") in ("spawn", "subagent_return")),
             "doc_rules": sum(1 for d in jsonl(hm / "ledger.jsonl") if d.get("source") not in (None, "user")),
             "jev_usd": jev.cost(sum(e.get("tokens") or 0 for e in ev)),
-            "bob_usd": stats.get("session_costs"), "minutes": (stats.get("duration_ms") or 0) / 60000}
+            "bob_usd": usd + audits if usd is not None else None, "audit_usd": audits,
+            "minutes": (stats.get("duration_ms") or 0) / 60000}
 
 
 def session_file(path):
