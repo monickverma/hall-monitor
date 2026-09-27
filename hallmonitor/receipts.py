@@ -111,6 +111,40 @@ def named_files(claim, known):
     return sorted(f for f in known if f.lower() in toks or f.lower().rsplit("/", 1)[-1] in toks)
 
 
+DECISION_RE = re.compile(r"\bD(\d+)(?:\s*[-\u2013]\s*D?(\d+))?\b")
+# Only a claim that rules were *recorded* is about the ledger; "satisfies rule D3" is about the work.
+RECORDED_RE = re.compile(r"\b(record(ed|s|ing)?|extract(ed|s|ing)?)\b", re.I)
+
+
+def recorded_decisions(claim, decisions):
+    """A claim that rules were recorded ("recorded them as decisions D1-D6") is checked against the rule
+    ledger, in code. Returns None when the claim isn't about recorded decisions, else (state, code, detail).
+    Real Bob, Sept 27: such a claim named the policy file and app/auth.py, and was contradicted because
+    neither changed."""
+    ids = []
+    for a, b in DECISION_RE.findall(claim):
+        ids += [f"D{n}" for n in range(int(a), int(b or a) + 1)] if int(b or a) - int(a) < 50 else []
+    if not ids or not RECORDED_RE.search(claim):
+        return None
+    missing = [i for i in dict.fromkeys(ids) if i not in decisions]
+    if missing:
+        return "contradicted", "unknown", f"{', '.join(missing)} is not in the rule ledger."
+    return "verified", "ledger", f"{', '.join(dict.fromkeys(ids))} are in the rule ledger."
+
+
+CONDITIONAL_RE = re.compile(r"^\s*(any\s+)?(changes?|edits?|modifications?)\s+(to|of|in)\b"
+                            r"|\b(if|when|whenever)\b.{0,80}\b(chang|edit|modif|touch)", re.I)
+
+
+def not_applicable(rule, files, changed):
+    """A rule about changes to certain files ("Changes to app/auth.py require a security review") holds when
+    none of them changed. Real Bob, Sept 27: that rule came back "needs evidence" every round of a task that
+    never touched app/auth.py, until the task was STUCK. Returns None when the rule does apply."""
+    if files and CONDITIONAL_RE.search(rule) and not any(f in changed for f in files):
+        return "verified", "not_applicable", f"{', '.join(files)} didn't change, so this rule doesn't apply."
+    return None
+
+
 def certify(kind, cited, named, changed, ledger, fresh, unknown=()):
     """The certificate check, in code. Returns None (go on to Jev) or (state, reason_code, detail).
     `unknown`: code files the claim names that exist nowhere in the repo (fabricated.unknown_files)."""
@@ -267,10 +301,13 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
             if kind == "not_a_claim" and isinstance(claims_or_summary, str):
                 continue
             claims.append({"claim": text, "kind": kind, "cited": cited, "from": "agent"})
-    # Obligations from the ledger are implicit claims: the finished work must satisfy them.
-    claims += [{"claim": f"The finished work satisfies the project rule {d['id']}: \"{d['text']}\"",
-                "kind": "obligation", "cited": [], "from": "ledger"}
-               for d in store.active_decisions(kind="obligation")]
+    # Obligations from the ledger are implicit claims: the finished work must satisfy them. With no edit in
+    # the evidence ledger there is no work for them to apply to: real Bob, Sept 27, a /decisions turn was
+    # asked to prove "Changes to app/auth.py require a security review" and spent its cost cap trying.
+    if any(r.get("kind") == "edit" for r in store.evidence()):
+        claims += [{"claim": f"The finished work satisfies the project rule {d['id']}: \"{d['text']}\"",
+                    "kind": "obligation", "cited": [], "from": "ledger", "rule": d["text"]}
+                   for d in store.active_decisions(kind="obligation")]
     # Audit notes count only for audits Hall Monitor requested in the last round, on the same claim.
     # Anything else is ignored, so attaching notes can't be used to skip a send-back round.
     requested = sess.get("pending_audits") or {}
@@ -288,6 +325,7 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
                if f.lower() not in docs and not f.lower().endswith((".md", ".txt", ".rst", ".pdf"))}
     tests = gitutil.run_tests(store.root, cfg["test_command"])
     ledger = {r["id"]: r for r in store.evidence()}
+    decisions = {d["id"] for d in store.ledger()}  # the rule ledger, for claims about recorded rules
     known = set(gitutil.tracked_files(store.root)) | set(all_changes) | \
         {r["file"] for r in ledger.values() if r.get("file")}
     free_retry = not sess["uncited_retry_used"]
@@ -300,7 +338,10 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
         # The diff Jev is shown. A rule's own files count too: real Bob, Sept 27, "The finished work satisfies
         # D1: Add a section to README.md" was judged on a diff without README.md and contradicted every round.
         c["where"] = named_files(c["claim"], known)
-        cert = None if c["from"] == "ledger" else \
+        about_rules = recorded_decisions(c["claim"], decisions) if c["from"] == "agent" else None
+        if c["from"] == "ledger":
+            about_rules = not_applicable(c["rule"], named_files(c["rule"], known), all_changes)
+        cert = about_rules if c["from"] == "ledger" else about_rules or \
             certify(c["kind"], c["cited"], c["named"], all_changes, ledger, tests,
                     FB.unknown_files(store.root, sess.get("base"), c["claim"], known))  # v4.2 fabricated files
         if cert and cert[1] == "uncited" and not free_retry:
@@ -314,6 +355,10 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
     changed_files = {f: c["status"] for f, c in changes.items()}
     if needs_sabotage:  # v4.2 extreme mutation (mutation.py): pseudo-tested functions join the sabotage evidence
         sab = {**sab, **mutation.extreme(store.root, changes, cfg)}
+        # Fail-before/pass-after: do the changed tests fail on the code as it was before the change?
+        before = gitutil.fail_before(store.root, sess.get("base"), changes, cfg["test_command"])
+        if before:
+            sab = {**sab, "tests_on_code_before_change": before}
 
     def verdict_job(i, deep=False):
         c = claims[i]
@@ -434,6 +479,12 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
     sess["pending_audits"] = {str(a["index"]): a["claim"] for a in audits}
     if status == "accept":  # the Stop backstop leaves work verified up to here alone (see stop_hook)
         sess["verified_edit_seq"] = sess["edit_seq"]
+    # v4 loop L4 -> L1: the files a contradicted claim names are suspect, so the next intent or edit that
+    # touches them gets the deep look straight away. A verified round clears them.
+    sess["suspect_files"] = {} if status == "accept" else {
+        **sess.get("suspect_files", {}),
+        **{f: r["claim"][:160] for r in rows if r["state"] == "contradicted"
+           for f in (claims[r["index"]].get("where") or [])}}
     store.save_session(sess)
 
     cps = EV.checkpoints(store.evidence())
@@ -545,6 +596,11 @@ def report(result):
             f"Sabotage: {s['killed']}/{s['mutants']} mutants killed"]
     out += [f"- survived: {m['file']}:{m['line']} `{m['from']}` -> `{m['to']}`" for m in s["survived"]]
     out += [f"- {x}" for x in mutation.lines(s)]  # v4.2 extreme mutation
+    fb = s.get("tests_on_code_before_change")
+    if fb:  # fail-before/pass-after
+        out.append(f"Changed tests on the code before the change: {fb['on_code_before_change'].upper()}"
+                   + (" (good: they check the change)" if fb["on_code_before_change"] == "fail"
+                      else " (they pass without the change, so they don't check it)"))
     if result.get("checkpoint"):
         cp = result["checkpoint"]
         out += ["", f"Last checkpoint: {cp['checkpoint']} (`{cp['ref']}`, from {cp['from']})"]

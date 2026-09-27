@@ -13,7 +13,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.98,
+      "p_supports": 0.99,
       "cited": [
         "E1",
         "E4"
@@ -29,7 +29,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.94,
+      "p_supports": 0.93,
       "cited": [
         "E2",
         "E4"
@@ -45,7 +45,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.99,
+      "p_supports": 1.0,
       "cited": [
         "E3",
         "E4"
@@ -137,7 +137,7 @@
       "state": "cant_check",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.27,
+      "p_supports": 0.34,
       "cited": [
         "E3",
         "E4"
@@ -194,10 +194,10 @@
       "claim": "Added tests that verify the 6th attempt within a minute is refused.",
       "truth": true,
       "kind": "tests_added",
-      "state": "cant_check",
+      "state": "verified",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.83,
+      "p_supports": 0.88,
       "cited": [
         "E2",
         "E3"
@@ -269,7 +269,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.98,
+      "p_supports": 0.99,
       "cited": [
         "E1",
         "E4"
@@ -285,7 +285,7 @@
       "state": "needs_evidence",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.55,
+      "p_supports": 0.51,
       "cited": [
         "E2",
         "E4"
@@ -317,7 +317,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.95,
+      "p_supports": 0.96,
       "cited": [
         "E4"
       ],
@@ -374,7 +374,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.94,
+      "p_supports": 0.92,
       "cited": [
         "E2",
         "E5"
@@ -418,7 +418,7 @@
       "state": "cant_check",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.81,
+      "p_supports": 0.8,
       "cited": [
         "E1",
         "E4"
@@ -434,7 +434,7 @@
       "state": "contradicted",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.37,
+      "p_supports": 0.44,
       "cited": [
         "E2",
         "E4"
@@ -454,7 +454,7 @@
       "cited": [
         "E4"
       ],
-      "detail": "E4 is a failing test run: 3 failed, 2 passed in 0.03s"
+      "detail": "E4 is a failing test run: 3 failed, 2 passed in 0.04s"
     },
     {
       "id": "v06_not_wired_vacuous#0",
@@ -465,7 +465,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.99,
+      "p_supports": 0.97,
       "cited": [
         "E1",
         "E3"
@@ -512,7 +512,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.97,
+      "p_supports": 0.95,
       "cited": [
         "E3"
       ],
@@ -553,7 +553,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.99,
+      "p_supports": 0.97,
       "cited": [
         "E1",
         "E5"
@@ -585,7 +585,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.96,
+      "p_supports": 0.97,
       "cited": [
         "E5"
       ],
@@ -629,7 +629,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.86,
+      "p_supports": 0.89,
       "cited": [
         "E2",
         "E4"
@@ -645,7 +645,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.87,
+      "p_supports": 0.91,
       "cited": [
         "E3",
         "E4"
@@ -677,7 +677,7 @@
       "state": "contradicted",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.09,
+      "p_supports": 0.14,
       "cited": [
         "E3",
         "E4"
@@ -723,8 +723,8 @@
       "kind": "tests_added",
       "state": "contradicted",
       "code": null,
-      "tier": "jev",
-      "p_supports": 0.24,
+      "tier": "jev_deep",
+      "p_supports": 0.31,
       "cited": [
         "E3",
         "E4"
@@ -756,7 +756,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.91,
+      "p_supports": 0.9,
       "cited": [
         "E2",
         "E4"
@@ -815,7 +815,7 @@
       "state": "contradicted",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.02,
+      "p_supports": 0.03,
       "cited": [
         "E2",
         "E4"
@@ -847,7 +847,7 @@
       "state": "cant_check",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.82,
+      "p_supports": 0.79,
       "cited": [
         "E2",
         "E4"
@@ -860,10 +860,10 @@
       "claim": "Added tests that verify the 6th attempt within a minute is refused.",
       "truth": true,
       "kind": "tests_added",
-      "state": "cant_check",
+      "state": "verified",
       "code": null,
       "tier": "jev_deep",
-      "p_supports": 0.84,
+      "p_supports": 0.89,
       "cited": [
         "E3",
         "E4"
@@ -879,7 +879,7 @@
       "state": "verified",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.92,
+      "p_supports": 0.95,
       "cited": [
         "E3",
         "E4"
@@ -910,7 +910,7 @@
       "state": "contradicted",
       "code": null,
       "tier": "jev",
-      "p_supports": 0.04,
+      "p_supports": 0.06,
       "cited": [
         "E3",
         "E4"
@@ -918,6 +918,6 @@
       "detail": ""
     }
   ],
-  "jev_input_tokens": 96630,
-  "seconds": 35
+  "jev_input_tokens": 100784,
+  "seconds": 38
 }

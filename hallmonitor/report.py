@@ -219,6 +219,9 @@ def write_hall_pass(store):
         ("failed steps handled", sum(1 for x in events if x.get("stage") == "intent"
                                      and (x.get("handles_failure") or 0) >= 0.5)),
         ("send-backs", sum(1 for x in last_r if x.get("action") in ("send_back", "stuck"))),
+        ("deep looks at suspect files", sum(1 for x in events if x.get("stage") == "intent" and x.get("suspect"))),
+        ("fresh intents after a drifted subagent", sum(1 for x in events if x.get("stage") == "step"
+                                                       and "drifted subagent" in (x.get("note") or ""))),
         ("escalations", sum(1 for x in events if x.get("escalated"))),
         ("asked you", sum(1 for x in events if "ask_human" in (x.get("action"), x.get("verdict")))),
     ]

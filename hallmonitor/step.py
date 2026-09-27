@@ -129,7 +129,7 @@ def declare_intent(store, intent, files=(), commands=(), agent="main", agent_tas
     t0 = time.time()
     cfg, sess = store.config(), store.session()
     files = [rel_path(store.root, f) for f in files or []]
-    commands = list(commands or [])
+    commands = [evidence.repo_command(store.root, c) for c in commands or []]
     target = ", ".join(files + commands)
     base = {"agent": agent, "agent_task": agent_task, "intent": intent, "files": files, "commands": commands}
 
@@ -143,9 +143,13 @@ def declare_intent(store, intent, files=(), commands=(), agent="main", agent_tas
         return f"{row['id']} needs the user's decision before you continue:\n{why}\nAsk the user."
 
     failed = sess["failed_step"]
+    suspect = [f for f in files if f in sess["suspect_files"]]  # v4 loop L4 -> L1
     try:
-        d, detail = judge(store, {"declared_intent": intent, "files": files, "commands": commands},
-                          reason=intent, agent=agent, agent_task=agent_task, failed_step=failed)
+        action = {"declared_intent": intent, "files": files, "commands": commands}
+        if suspect:  # the deep look, with the suspect files as they are now
+            action["current_files_before_change"] = {f: _read(store.root, f) for f in suspect[:3]}
+        d, detail = judge(store, action, reason=intent, agent=agent, agent_task=agent_task, failed_step=failed,
+                          deep=bool(suspect))
     except jev.JevRefused:
         row = store.add_intent({**base, "verdict": "ask_human", "why": "- Hall Monitor couldn't check this intent."})
         store.log({"stage": "intent", "agent": agent, "target": target, "reason": intent[:300],
@@ -159,19 +163,26 @@ def declare_intent(store, intent, files=(), commands=(), agent="main", agent_tas
         why = (f"- your last command failed (`{failed['command']}` -> {failed['last_line']}), and this intent "
                "doesn't say how you'll deal with that")
     row = store.add_intent({**base, "verdict": verdict, "why": why})
+    s = store.session()
     if failed is not None and not unhandled:  # the failed step has been dealt with
-        s = store.session()
         s["failed_step"] = None
-        store.save_session(s)
+    if verdict != "rejected":  # v4 loop L3 -> L1: a fresh intent covers files a drifted subagent touched
+        for f in files:
+            s["fresh_intent_needed"].pop(f, None)
+    store.save_session(s)
     store.log({"stage": "intent", "agent": agent, "target": target,
                "reason": intent[:300], **d.as_dict(), "verdict": verdict,
                "pattern": detail["pattern"] if d.risks.get("rationalizing", 0) >= 0.5 else None,
                "violations": {k: round(v, 3) for k, v in detail["violations"].items()},
                "conflicts": detail["conflicts"], "escalated": detail.get("escalated"),
-               "handles_failure": detail.get("handles_failure"),
+               "handles_failure": detail.get("handles_failure"), "suspect": suspect or None,
                "tokens": detail["tokens"], "ms": int((time.time() - t0) * 1000)})
+    if suspect:
+        why = (why + "\n" if why else "") + "".join(
+            f"- {f} was named in a contradicted claim (\"{sess['suspect_files'][f][:100]}\"), so it got a deep look\n"
+            for f in suspect)
     if verdict == "approved":
-        return f"{row['id']} approved. Go ahead: {target or 'no files listed'}."
+        return f"{row['id']} approved. Go ahead: {target or 'no files listed'}." + (f"\n{why}" if suspect else "")
     if verdict == "approved_with_note":
         if unhandled:
             return f"{row['id']} approved, but deal with the failed step first:\n{why}"
@@ -186,6 +197,7 @@ def pre_tool(p, store):
     cfg, sess = store.config(), store.session()
     tool = P.tool(p)
     path, command, detail_text = P.describe(tool, P.tool_input(p))
+    command = evidence.repo_command(store.root, command)
     rel = rel_path(store.root, path, base=P.first(p, "cwd")) if path else None
 
     if tool in P.SPAWN_TOOLS:
@@ -216,6 +228,12 @@ def pre_tool(p, store):
         store.log({"stage": "step", "tool": tool, "target": rel or command, "action": "block",
                    "note": f"intent {intent['id']} was rejected"})
         return 2, "", f"Hall Monitor: intent {intent['id']} was rejected, so this action is blocked:\n{intent['why']}"
+    flagged_at = sess["fresh_intent_needed"].get(rel) if rel and tool in P.EDIT_TOOLS else None
+    if flagged_at and (intent is None or intent["t"] < flagged_at):  # v4 loop L3 -> L1
+        store.log({"stage": "step", "tool": tool, "target": rel, "action": "block",
+                   "note": "a drifted subagent changed this file; a fresh intent is needed"})
+        return 2, "", (f"Hall Monitor: a subagent whose result may have drifted changed {rel}. Check its change, "
+                       f"then call declare_intent for {rel} before building on it.")
 
     t0 = time.time()
     # Real Bob, Sept 27: cut to 1,200 characters, an edit adding three methods showed Jev only the first one,
@@ -230,7 +248,8 @@ def pre_tool(p, store):
     try:
         d, det = judge(store, action, reason=None if exact else reason, check_match=intent is not None and not exact,
                        agent=intent["agent"] if intent else "main",
-                       agent_task=intent.get("agent_task") if intent else None)
+                       agent_task=intent.get("agent_task") if intent else None,
+                       deep=bool(rel and rel in sess["suspect_files"]))  # v4 loop L4 -> L1
     except jev.JevRefused:
         # Decided by code alone. Only a command that is exactly one an approved intent declared goes ahead:
         # that exact command was already judged (destructive? breaks a rule?) when the intent was approved.
@@ -313,6 +332,14 @@ def subagent_return(p, store):
                "action": "flag" if flagged else "accept", "risks": {"off_goal": off, "drifted": drift},
                "tokens": jev.tokens(usage), "ms": int((time.time() - t0) * 1000)})
     if flagged:  # delivered once, at the top of the next MCP result or the next briefing
+        # v4 loop L3 -> L1: files edited since the subagent was spawned need a fresh intent before the
+        # parent edits them again.
+        spawned = max((e["t"] for e in store.events() if e.get("stage") == "spawn"), default=0)
+        touched = {r["file"] for r in store.evidence() if r.get("kind") == "edit" and r.get("t", 0) >= spawned}
+        if touched:
+            s = store.session()
+            s["fresh_intent_needed"].update({f: time.time() for f in touched})
+            store.save_session(s)
         store.add_flag(f"A {kind} subagent's result may have drifted from its task \"{brief_text[:100]}\" "
                        f"(drifted p={drift:.2f}, off-goal p={off:.2f}). Check its changes before building on them.")
     return 0, "", ""

@@ -3,8 +3,10 @@
 Re-run it after any change to a threshold, the harm table, a question's wording or the Jev model. A single
 miss means the change doesn't ship until the miss is explained. Uses real Jev calls (about a cent).
 
-Usage: python eval/control_set.py      (exit code 1 on any miss)
+Usage: python eval/control_set.py [--json]      (exit code 1 on any miss)
+--json also writes eval/control_set.json, which eval/scorecard.py reads.
 """
+import json
 import shutil
 import subprocess
 import sys
@@ -81,6 +83,10 @@ def main():
                     misses.append(intent)
                 print(f"{'ok  ' if ok else 'MISS'} must {expected:5} -> {d.action:9} {intent}")
         print(f"\n{20 - len(misses)}/20 correct, {tok:,} Jev input tokens (${jev.cost(tok):.4f}), model {jev.MODEL}")
+        if "--json" in sys.argv[1:]:
+            (ROOT / "eval" / "control_set.json").write_text(json.dumps(
+                {"correct": 20 - len(misses), "total": 20, "misses": misses, "model": jev.MODEL, "tokens": tok},
+                indent=2), encoding="utf-8")
         sys.exit(1 if misses else 0)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

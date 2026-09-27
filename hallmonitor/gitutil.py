@@ -159,6 +159,27 @@ def is_test(path):
     return name.startswith("test_") or name.endswith("_test.py") or "tests/" in path.replace("\\", "/")
 
 
+def fail_before(root, base, changes_, cmd, timeout=120):
+    """Fail-before/pass-after (v4 design): the changed tests, run in a scratch copy where the changed code is
+    put back as it was at `base`. Tests that pass there don't check the change. None when the change holds
+    no Python tests or no Python code, or there's no base to compare with."""
+    tests = sorted(f for f in changes_ if is_test(f) and f.endswith(".py"))
+    code = sorted(f for f in changes_ if not is_test(f) and f.endswith(".py"))
+    if not tests or not code or not base:
+        return None
+    with tempfile.TemporaryDirectory(prefix="hm-before-") as tmp:
+        copy_tree(root, tmp)
+        existed = set(git(root, "ls-tree", "-r", "--name-only", base, "--", *code).splitlines())
+        for f in code:
+            if f in existed:
+                (Path(tmp) / f).write_text(git(root, "show", f"{base}:{f}"), encoding="utf-8")
+            else:
+                (Path(tmp) / f).unlink(missing_ok=True)
+        r = run_tests(tmp, cmd, timeout=timeout, copy=True)
+    return {"changed_tests": tests, "code_put_back": code,
+            "on_code_before_change": "pass" if r["passed"] else "fail", "tail": r["tail"][-3:]}
+
+
 def plan_mutants(root, changes_, max_mutants=4):
     """(path, lineno, original line, mutated line) for up to `max_mutants` changed, non-test source lines."""
     plan = []

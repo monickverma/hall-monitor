@@ -12,6 +12,7 @@ the top of the next MCP result, or in the next prompt's briefing.
 """
 import hashlib
 import re
+from pathlib import Path
 
 from . import gitutil, payload as P
 from .store import rel_path
@@ -35,6 +36,22 @@ def outcome(output, exit_code=None):
     if PASS.search(output or ""):
         return "pass", "inferred"
     return "unknown", "inferred"
+
+
+CD_PREFIX = re.compile(r"""^\s*cd\s+(?:"([^"]+)"|'([^']+)'|(\S+))\s*(?:&&|;)\s*""")
+
+
+def repo_command(root, command):
+    """The command as it runs in the repo. Real Bob Shell on Linux, Sept 27: Bob runs `cd <workspace> && python
+    -m pytest ...`, so no test run counted as a test receipt and no command matched its declared intent. A
+    leading `cd` into the repo (or a folder inside it) is dropped; a `cd` anywhere else is kept."""
+    m = CD_PREFIX.match(command or "")
+    if not m:
+        return command
+    d = next(g for g in m.groups() if g)
+    root = Path(root).resolve()
+    target = (Path(d) if Path(d).is_absolute() else root / d).resolve()
+    return command[m.end():] if target == root or root in target.parents else command
 
 
 def is_test_command(command, cfg):
@@ -111,6 +128,7 @@ def record(p, store):
     cfg, sess = store.config(), store.session()
     tool = P.tool(p)
     path, command, detail = P.describe(tool, P.tool_input(p))
+    command = repo_command(store.root, command)
     if tool in P.EDIT_TOOLS and path:
         rel = rel_path(store.root, path, base=P.first(p, "cwd"))
         sess["edit_seq"] += 1
