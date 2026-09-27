@@ -434,6 +434,12 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
     sess["pending_audits"] = {str(a["index"]): a["claim"] for a in audits}
     if status == "accept":  # the Stop backstop leaves work verified up to here alone (see stop_hook)
         sess["verified_edit_seq"] = sess["edit_seq"]
+    # v4 loop L4 -> L1: the files a contradicted claim names are suspect, so the next intent or edit that
+    # touches them gets the deep look straight away. A verified round clears them.
+    sess["suspect_files"] = {} if status == "accept" else {
+        **sess.get("suspect_files", {}),
+        **{f: r["claim"][:160] for r in rows if r["state"] == "contradicted"
+           for f in (claims[r["index"]].get("where") or [])}}
     store.save_session(sess)
 
     cps = EV.checkpoints(store.evidence())

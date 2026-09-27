@@ -106,7 +106,8 @@ class Store:
                      "intents": [], "blocks": [], "flags": [], "off_task_streak": 0,
                      "edit_seq": 0, "edits_since_test": 0, "stalls": 0, "fail_repeats": {},
                      "failed_step": None, "regression_seen": None, "send_backs": 0, "verified_edit_seq": 0,
-                     "uncited_retry_used": False, "last_send_back": None, "pending_audits": {}}.items():
+                     "uncited_retry_used": False, "last_send_back": None, "pending_audits": {},
+                     "suspect_files": {}, "fresh_intent_needed": {}}.items():
             s.setdefault(k, v)
         return s
 
