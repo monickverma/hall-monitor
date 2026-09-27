@@ -29,7 +29,8 @@ CAP = {"E0": 3, "E1": 5, "E2": 6, "E3": 8, "E4": 9, "E5": 10}
 
 # part: (weight, quality, why the quality is what it is). Revisit these by hand; everything else is computed.
 RUBRIC = {
-    "receipts": (0.25, 8, "Per-claim verdicts on evidence Hall Monitor produced itself (fresh tests, sabotage)"),
+    "receipts": (0.25, 8.5, "Per-claim verdicts on evidence Hall Monitor produced itself: fresh tests, sabotage, "
+                            "and changed tests re-run on the code before the change"),
     "step monitor": (0.20, 7.5, "Least-harm judgment of every intent; excuses named; code rules before Jev"),
     "robustness in real Bob": (0.15, 5, "Real Bob found 12 bugs on Sept 27, all false alarms; all fixed, the last "
                                         "5 not yet re-run in real Bob"),

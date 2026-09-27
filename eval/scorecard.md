@@ -4,7 +4,7 @@ score = min(quality, cap of the strongest evidence). Evidence: E0 design · E1 u
 
 | Part | Weight | Quality | Evidence | Cap | **Score** | Evidence used | Why this quality |
 |---|---|---|---|---|---|---|---|
-| receipts | 25% | 8 | E4 | 9 | **8** | 6 real runs | Per-claim verdicts on evidence Hall Monitor produced itself (fresh tests, sabotage) |
+| receipts | 25% | 8.5 | E4 | 9 | **8.5** | 6 real runs | Per-claim verdicts on evidence Hall Monitor produced itself: fresh tests, sabotage, and changed tests re-run on the code before the change |
 | step monitor | 20% | 7.5 | E4 | 9 | **7.5** | 1 excuse named in real Bob | Least-harm judgment of every intent; excuses named; code rules before Jev |
 | robustness in real Bob | 15% | 5 | E4 | 9 | **5** | 6 real runs | Real Bob found 12 bugs on Sept 27, all false alarms; all fixed, the last 5 not yet re-run in real Bob |
 | explainability | 10% | 8 | E4 | 9 | **8** | Hall Passes from real runs | Hall Pass built from the session's own log; says why a task stopped |
@@ -14,7 +14,7 @@ score = min(quality, cap of the strongest evidence). Evidence: E0 design · E1 u
 | learning and eval | 5% | 6 | E3 | 8 | **6** | seeded eval, no reviewer data yet | Seeded eval with a certified threshold; noisy at n=38; control set |
 | cost and latency | 5% | 6.5 | E4 | 9 | **6.5** | costs and times of real runs | Jev costs fractions of a cent; receipts rounds can add minutes |
 
-**Overall: 7.0/10**
+**Overall: 7.1/10**
 
 ## Measured
 
@@ -28,7 +28,7 @@ score = min(quality, cap of the strongest evidence). Evidence: E0 design · E1 u
 - median Bob cost per run: 0.39
 - median minutes per run: 0.7
 - seeded: caught: 21/22
-- seeded: false alarms: 4/38
+- seeded: false alarms: 2/38
 - control set: 20/20
 - reviewers with timings: 0
 

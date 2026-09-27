@@ -63,8 +63,8 @@ Runs **125 tests** with no API key needed. CI runs them on Ubuntu and Windows wi
 Numbers are from `eval/summary.json` (on claims we seeded ourselves) and `eval/review_queue_summary.json` (on events from our own scripted and test sessions).
 
 **Claim verification** (`eval/summary.json`, n=60 claims, 10 scenario variants):
-- 21/22 false claims caught; 4 false alarms out of 38 true claims; agreement 55/60; Brier score 0.0355. Jev's verdicts vary between runs: seven runs on the same Jev inputs gave 1 to 5 false alarms (mean 3.3).
-- Certified auto-accept threshold for the Jev tier: 0.5. Above it, 24 verdicts were accepted and 1 was wrong; the error rate is at most 15.3% at 90% confidence (n=34 claims).
+- 21/22 false claims caught; 2 false alarms out of 38 true claims; agreement 57/60; Brier score 0.0389. Jev's verdicts vary between runs: with fail-before evidence, two runs gave 1 and 2 false alarms; seven runs before it gave 1 to 5 (mean 3.3).
+- Certified auto-accept threshold for the Jev tier: 0.5. Above it, 24 verdicts were accepted and 1 was wrong; the error rate is at most 15.3% at 90% confidence (n=33 claims).
 
 **Bulk classification** (`eval/review_queue_summary.json`, n=42 events, 11 sessions):
 - Jev labelled all 42 events in 2.8 s for $0.0013 (31,156 input tokens) and flagged 63.5% as needing a person. That rate is Jev's alone: the human labels that would correct it (prediction-powered inference) aren't collected yet.
