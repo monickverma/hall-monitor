@@ -32,13 +32,16 @@ RUBRIC = {
     "receipts": (0.25, 8.5, "Per-claim verdicts on evidence Hall Monitor produced itself: fresh tests, sabotage, "
                             "and changed tests re-run on the code before the change"),
     "step monitor": (0.20, 7.5, "Least-harm judgment of every intent; excuses named; code rules before Jev"),
-    "robustness in real Bob": (0.15, 5, "Real Bob found 12 bugs on Sept 27, all false alarms; all fixed, the last "
-                                        "5 not yet re-run in real Bob"),
+    "robustness in real Bob": (0.15, 5.5, "Single-agent tasks now verify in the first round in real Bob (docs, "
+                                          "/decisions x2); the fixes for 12 earlier false alarms held there. The "
+                                          "task with parallel subagents hasn't verified yet: its last run found 4 "
+                                          "more false alarms, fixed but not re-run"),
     "explainability": (0.10, 8, "Hall Pass built from the session's own log; says why a task stopped"),
     "rules and plan": (0.10, 7, "Policy PDF and prompt lines become rules; plan gate on PLAN.md"),
     "drift and stalls": (0.05, 6, "Named stall patterns and checkpoints; one real false stall, fixed"),
     "subagents": (0.05, 7, "Briefs checked before a subagent starts, summaries after it returns"),
-    "learning and eval": (0.05, 6, "Seeded eval with a certified threshold; noisy at n=38; control set"),
+    "learning and eval": (0.05, 6.5, "Seeded eval with a certified threshold (noisy at n=38); control set; Jev "
+                                     "labels the real Bob sessions for the review queue; no human labels yet"),
     "cost and latency": (0.05, 6.5, "Jev costs fractions of a cent; receipts rounds can add minutes"),
 }
 

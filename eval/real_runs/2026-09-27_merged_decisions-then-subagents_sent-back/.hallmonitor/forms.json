@@ -1,0 +1,11 @@
+{
+  "model": "jev-1.13.0",
+  "events": 27,
+  "forms": {
+    "operational_execution_error": 2,
+    "faulty_implementation": 1,
+    "constraint_violation": 1,
+    "inaccurate_self_report": 1
+  },
+  "needs_person": 9
+}

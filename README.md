@@ -66,9 +66,9 @@ Numbers are from `eval/summary.json` (on claims we seeded ourselves) and `eval/r
 - 21/22 false claims caught; 2 false alarms out of 38 true claims; agreement 57/60; Brier score 0.0389. Jev's verdicts vary between runs: with fail-before evidence, two runs gave 1 and 2 false alarms; seven runs before it gave 1 to 5 (mean 3.3).
 - Certified auto-accept threshold for the Jev tier: 0.5. Above it, 24 verdicts were accepted and 1 was wrong; the error rate is at most 15.3% at 90% confidence (n=33 claims).
 
-**Bulk classification** (`eval/review_queue_summary.json`, n=42 events, 11 sessions):
-- Jev labelled all 42 events in 2.8 s for $0.0013 (31,156 input tokens) and flagged 63.5% as needing a person. That rate is Jev's alone: the human labels that would correct it (prediction-powered inference) aren't collected yet.
-- Failure forms: none 23, inaccurate self-report 11, constraint violation 6, self-initiated overreach 2.
+**Bulk classification** (`eval/review_queue_summary.json`, n=183 events, 18 sessions: 7 real Bob Shell runs in `eval/real_runs/`, the scripted demo, and 10 seeded sessions):
+- Jev labelled all 183 events in 6.0 s for $0.0057 (135,024 input tokens) and flagged 51.3% as needing a person. That rate is Jev's alone: the human labels that would correct it (prediction-powered inference) aren't collected yet; `eval/review_queue_sample.csv` holds the 30-event blind sample for a person to label.
+- Failure forms: none 124, inaccurate self-report 28, operational execution error 16, constraint violation 13, faulty implementation 1, self-initiated overreach 1.
 
 **Human review pilot:** no data yet.
 

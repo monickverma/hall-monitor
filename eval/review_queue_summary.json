@@ -1,17 +1,19 @@
 {
   "model": "jev-1.13.0",
-  "events": 42,
-  "sessions": 11,
-  "requests": 42,
-  "seconds": 2.8,
-  "jev_input_tokens": 31156,
-  "cost": 0.00131,
-  "jev_rate_needs_person": 0.635,
+  "events": 183,
+  "sessions": 18,
+  "requests": 183,
+  "seconds": 6.0,
+  "jev_input_tokens": 135024,
+  "cost": 0.00567,
+  "jev_rate_needs_person": 0.513,
   "ppi": null,
   "failure_forms_jev": {
-    "none": 23,
-    "inaccurate_self_report": 11,
-    "constraint_violation": 6,
-    "self_initiated_overreach": 2
+    "none": 124,
+    "inaccurate_self_report": 28,
+    "operational_execution_error": 16,
+    "constraint_violation": 13,
+    "faulty_implementation": 1,
+    "self_initiated_overreach": 1
   }
 }
