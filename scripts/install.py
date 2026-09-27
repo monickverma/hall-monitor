@@ -74,9 +74,12 @@ def main(repo, probe=False):
         merge_json(bob / "settings.json", hooks(HERE / "hm_hook.py", TOOLS))
     # Only fields listed for .bob/mcp.json in the rulesync Bob target (#3011). No timeout: its unit is
     # unverified, and a wrong unit would cut off Jev calls.
+    # Bob starts the server without the user's environment (probe, Sept 27; Linux container, Sept 27), but
+    # expands ${env:NAME} in mcp.json from its own (Bob Shell 2.0.5 docs). A reference, never the key.
     merge_json(bob / "mcp.json", {"mcpServers": {"hall-monitor": {
         "command": Path(sys.executable).as_posix(), "args": [(HERE / "hm_mcp.py").as_posix()],
-        "cwd": repo.as_posix(), "env": {"HM_ROOT": repo.as_posix()}, "alwaysAllow": MCP_TOOLS}}})
+        "cwd": repo.as_posix(), "env": {"HM_ROOT": repo.as_posix(), "TYPESAFE_API_KEY": "${env:TYPESAFE_API_KEY}"},
+        "alwaysAllow": MCP_TOOLS}}})
 
     # Our modes sit at the end of the file after MARKER, so reinstalling replaces them in place.
     modes = bob / "custom_modes.yaml"

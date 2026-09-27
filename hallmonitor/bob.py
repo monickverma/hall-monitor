@@ -3,6 +3,8 @@
 `bob run --format json` returns one object with `status`, `last_message` and `stats` (task_id, token
 counts, duration_ms, session_costs, tool_calls). Under `bob run` every tool is pre-approved, so no
 human approves anything: Hall Monitor's hooks and the no-edit auditor mode are the only gate.
+Bob Shell reads its key from BOB_API_KEY. HM_BOB_ACCEPT_LICENSE=1 and HM_BOB_TEAM_ID=<id> are opt-ins for a
+fresh machine; a failure before the task runs comes back as status "unparsed" with Bob's `error`.
 """
 import json
 import os
@@ -15,7 +17,14 @@ def _run(root, mode, prompt, max_cost, max_turns, timeout):
     if os.environ.get("HM_DISABLE_BOB_SHELL") or not shutil.which("bob"):
         return None
     cmd = ["bob", "run", "--mode", mode, "--format", "json", "--max-cost", str(max_cost),
-           "--max-turns", str(max_turns), "--workspace", str(root), prompt]
+           "--max-turns", str(max_turns), "--workspace", str(root)]
+    # On a fresh machine (a CI runner) `bob run` stops at IBM's license, and a "general" API key needs a
+    # team id. Both are the operator's to give: Hall Monitor never accepts the license on its own.
+    if os.environ.get("HM_BOB_ACCEPT_LICENSE"):
+        cmd.append("--accept-license")
+    if os.environ.get("HM_BOB_TEAM_ID"):
+        cmd += ["--team-id", os.environ["HM_BOB_TEAM_ID"]]
+    cmd.append(prompt)
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     except (OSError, subprocess.TimeoutExpired):
@@ -23,7 +32,8 @@ def _run(root, mode, prompt, max_cost, max_turns, timeout):
     try:
         data = json.loads(r.stdout)
     except json.JSONDecodeError:
-        return {"status": "unparsed", "last_message": r.stdout[-3000:], "stats": {}, "exit_code": r.returncode}
+        return {"status": "unparsed", "last_message": r.stdout[-3000:], "stats": {}, "exit_code": r.returncode,
+                "error": (r.stderr or "").strip()[-1000:]}
     data["exit_code"] = r.returncode
     return data
 

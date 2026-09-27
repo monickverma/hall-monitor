@@ -52,6 +52,7 @@ def test_install_merges_existing_files_and_is_idempotent(tmp_path, capsys):
     assert servers["other"] == {"command": "other-server"}
     assert set(servers["hall-monitor"]["alwaysAllow"]) == SEVEN
     assert servers["hall-monitor"]["env"]["HM_ROOT"] == repo.resolve().as_posix()
+    assert servers["hall-monitor"]["env"]["TYPESAFE_API_KEY"] == "${env:TYPESAFE_API_KEY}"  # a reference, never the key
     modes = first[".bob/custom_modes.yaml"]
     assert modes.startswith(OTHER_MODE.rstrip()) and modes.count(install.MARKER) == 1
     assert "slug: supervised" in modes
