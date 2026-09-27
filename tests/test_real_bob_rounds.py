@@ -2,7 +2,8 @@
 - The same claim on the same diff was verified in one round and contradicted in the next ($2.51 run).
 - "Tests must assert on the specific changed behavior" (D5) went to an audit in four runs; each audit cost Bob a
   round, and the Bob Shell audit never ran (no BOB_API_KEY in the MCP server).
-- A docstring-only change was held to "Every behavior change must ship with a test that fails without the change"."""
+- A docstring-only change was held to "Every behavior change must ship with a test that fails without the change".
+- Sept 28: two parallel subagents' rounds were held to each other's work ("stale", "replay_mismatch")."""
 import sys
 
 from conftest import FakeJev, make_repo
@@ -139,6 +140,46 @@ def test_code_added_or_removed_is_a_behavior_change(tmp_path):
     changes = {f: c for f, c in gitutil.changes(store.root, base).items() if f in ("app/rl.py", ".gitignore")}
     lines = gitutil.behavior_lines(store.root, base, changes)
     assert lines == [("app/rl.py", -3)]  # `x = 1` went; the docstring and .gitignore don't count
+
+
+# ------------------------------------------------------------------ parallel subagents
+
+A_CLAIM = [{"claim": "Added tests/test_a.py, which checks that f() in app/a.py returns 1; the tests pass.",
+            "evidence": ["E1", "E2", "E3"]}]
+BROKEN = "from app.b import g\n\ndef test_g(:\n"  # subagent B's test file, half-written
+
+
+def subagent_a(tmp_path, b_first=None, b_after=None):
+    """Subagent A changes app/a.py and tests/test_a.py and runs its tests (E3); subagent B edits its own files
+    before (b_first) or after (b_after) that run."""
+    store = make_repo(tmp_path, {"app/__init__.py": "", "app/a.py": "def f():\n    return 0\n",
+                                 "app/b.py": "def g():\n    return 0\n", "tests/__init__.py": ""},
+                      config={"test_command": CMD, "max_mutants": 1, "max_extreme_mutants": 0})
+    write(store, {"app/a.py": "def f():\n    return 1\n",
+                  "tests/test_a.py": "from app.a import f\n\ndef test_f():\n    assert f() == 1\n"})
+    for path, text in (b_first or {}).items():
+        (store.root / path).write_text(text, encoding="utf-8")
+    EV.record({"event": "PostToolUse", "tool": "execute_command",
+               "input": {"command": "python -m pytest -q tests/test_a.py"}, "output": "1 passed in 0.01s"}, store)
+    write(store, b_after or {})
+    return store
+
+
+def test_another_subagents_later_edit_doesnt_make_a_subagents_test_run_stale(tmp_path, monkeypatch):
+    monkeypatch.setattr(jev, "ask", FakeJev())
+    store = subagent_a(tmp_path, b_after={"app/b.py": "def g():\n    return 2\n"})
+    assert receipts.verify(store, A_CLAIM, agent="subagent-a")["rows"][0]["state"] == "verified"
+    main = receipts.verify(store, A_CLAIM)["rows"][0]  # the finished work: B's edit came after E3
+    assert (main["state"], main["code"]) == ("needs_evidence", "stale")
+
+
+def test_another_subagents_half_written_test_doesnt_contradict_a_subagent(tmp_path, monkeypatch):
+    monkeypatch.setattr(jev, "ask", FakeJev())
+    store = subagent_a(tmp_path, b_first={"tests/test_b.py": BROKEN})
+    sub = receipts.verify(store, A_CLAIM, agent="subagent-a")
+    assert sub["rows"][0]["state"] == "verified" and sub["tests"]["command"].endswith("tests/test_a.py")
+    main = receipts.verify(store, A_CLAIM)["rows"][0]  # the whole suite doesn't collect
+    assert (main["state"], main["code"]) == ("contradicted", "replay_mismatch")
 
 
 # ------------------------------------------------------------------ the Bob Shell audit

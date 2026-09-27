@@ -255,9 +255,23 @@ def tests_catch_change(before, sab):
     return None
 
 
-def certify(kind, cited, named, changed, ledger, fresh, unknown=()):
+def own_files(claims, known):
+    """The files a submission's claims name: a subagent's part."""
+    return {f for c in claims for f in named_files(c["claim"], known)}
+
+
+def own_test_command(cmd, claims, known, root):
+    """The test command for a subagent's round: pytest on the test files its claims name, or None (the whole
+    suite) when they name none or the project doesn't use pytest."""
+    tests = sorted(f for f in own_files(claims, known)
+                   if gitutil.is_test(f) and f.endswith(".py") and (Path(root) / f).is_file())
+    return f"{cmd} {' '.join(tests)}" if tests and "pytest" in cmd else None
+
+
+def certify(kind, cited, named, changed, ledger, fresh, unknown=(), own=None):
     """The certificate check, in code. Returns None (go on to Jev) or (state, reason_code, detail).
-    `unknown`: code files the claim names that exist nowhere in the repo (fabricated.unknown_files)."""
+    `unknown`: code files the claim names that exist nowhere in the repo (fabricated.unknown_files).
+    `own`: in a subagent's round, the files its claim names; only their edits make its test run stale."""
     if unknown and kind in CHANGE_KINDS:  # v4.2: a claim about a file that doesn't exist is false, however cited
         return "contradicted", "unknown_file", FB.message(unknown)
     # What the claim itself says about files is decided first: a claim that files changed when none of
@@ -287,7 +301,7 @@ def certify(kind, cited, named, changed, ledger, fresh, unknown=()):
         return ("needs_evidence", "out_of_scope",
                 f"None of {', '.join(cited)} touches {', '.join(named)}. Cite the receipts for those files.")
     if tests:
-        last_edit = EV.last_code_edit_seq(ledger.values())
+        last_edit = EV.last_code_edit_seq(r for r in ledger.values() if own is None or r.get("file") in own)
         if tests[-1]["edit_seq"] < last_edit:
             return ("needs_evidence", "stale", f"{tests[-1]['id']} ran before your last code edit (#{last_edit}). "
                     "Re-run the tests and cite the new run.")
@@ -436,12 +450,19 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
     docs = {cfg["claims_file"].lower()}
     changes = {f: c for f, c in all_changes.items()
                if f.lower() not in docs and not f.lower().endswith((".md", ".txt", ".rst", ".pdf"))}
-    tests = gitutil.run_tests(store.root, cfg["test_command"])
     ledger = {r["id"]: r for r in store.evidence()}
     decisions = {d["id"] for d in store.ledger()}  # the rule ledger, for claims about recorded rules
     known = set(gitutil.tracked_files(store.root)) | set(all_changes) | \
         {r["file"] for r in ledger.values() if r.get("file")}
     free_retry = not sess["uncited_retry_used"]
+    # A subagent's round checks its part; the main agent's final round checks the whole. So a subagent's fresh
+    # test run (and sabotage) covers the test files its claims name, and its test run goes stale only when a file
+    # its claim names changes after it. Real Bob, Sept 28 (subagents): two parallel subagents' rounds were held to
+    # each other's work. One's claims came back "stale" after the other's later edit; the other's came back
+    # "contradicted" because the full suite failed to collect the first one's half-written test file.
+    cmd = own_test_command(cfg["test_command"], claims, known, store.root) if agent != "main" else None
+    cmd = cmd or cfg["test_command"]
+    tests = gitutil.run_tests(store.root, cmd)
 
     for c in claims:
         # A header's files tell where an item is; they aren't what a claim that something stayed the
@@ -457,20 +478,22 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
                 no_behavior_change(c["rule"], store.root, sess.get("base"), changes)
         cert = about_rules if c["from"] == "ledger" else about_rules or \
             certify(c["kind"], c["cited"], c["named"], all_changes, ledger, tests,
-                    FB.unknown_files(store.root, sess.get("base"), c["claim"], known))  # v4.2 fabricated files
+                    FB.unknown_files(store.root, sess.get("base"), c["claim"], known),  # v4.2 fabricated files
+                    own=c["named"] if agent != "main" and c["named"] else None)
         if cert and cert[1] == "uncited" and not free_retry:
             cert, c["uncited_fallback"] = None, True  # after the free retry: judged the old way, marked uncited
         c["cert"] = cert
 
     to_judge = [i for i, c in enumerate(claims) if c["cert"] is None]
     needs_sabotage = tests["passed"] and any(claims[i]["kind"] in SABOTAGE_KINDS for i in to_judge)
-    sab = gitutil.sabotage(store.root, changes, cfg["test_command"], cfg["max_mutants"]) if needs_sabotage \
+    mine = {f: ch for f, ch in changes.items() if f in own_files(claims, known)} if agent != "main" else {}
+    sab = gitutil.sabotage(store.root, mine or changes, cmd, cfg["max_mutants"]) if needs_sabotage \
         else {"mutants": 0, "killed": 0, "survived": [], "note": "not run"}
     changed_files = {f: c["status"] for f, c in changes.items()}
     if needs_sabotage:  # v4.2 extreme mutation (mutation.py): pseudo-tested functions join the sabotage evidence
-        sab = {**sab, **mutation.extreme(store.root, changes, cfg)}
+        sab = {**sab, **mutation.extreme(store.root, mine or changes, {**cfg, "test_command": cmd})}
         # Fail-before/pass-after: do the changed tests fail on the code as it was before the change?
-        before = gitutil.fail_before(store.root, sess.get("base"), changes, cfg["test_command"])
+        before = gitutil.fail_before(store.root, sess.get("base"), changes, cmd)
         if before:
             sab = {**sab, "tests_on_code_before_change": before}
             # A rule that tests must fail without the change is exactly this check, so code decides it.
