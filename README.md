@@ -7,7 +7,7 @@
 - **Declared intents, with excuses named:** before every edit or command Bob declares what it will do; Hall Monitor names rationalization patterns ("just this once", "it's faster", "the spirit of the rule allows it") and rejects them before anything runs.
 - **Receipts:** every claim Bob makes cites E-IDs from `list_evidence`. Code checks the receipts first — including whether every file a claim names actually exists in the repo (`unknown_file`, tier 0) — and then Jev checks them. Sabotage mutants run in a scratch copy of the repo (never in your working tree); extreme mutation (replacing a whole function body) finds pseudo-tested functions. Uncertain claims escalate to a read-only Bob auditor subagent, then to you. Hall Monitor stops and asks the user after 2 send-backs, naming the checkpoint to restore.
 - **Checkpoints:** a passing test run becomes a git checkpoint (`refs/hallmonitor/C<n>`), a state Bob can return to.
-- **The Hall Pass:** Bob publishes a one-page HTML report (`create_html_artifact`) at the end of every supervised session.
+- **The Hall Pass:** a one-page HTML report of the session. Hall Monitor writes it to `.hallmonitor/hall-pass.html`, and `/hall-pass` has Bob publish it with `create_html_artifact`.
 
 TypeSafe's Jev makes every judgment in one cheap parallel call. A whole supervised session costs about $0.003 of Jev.
 
@@ -15,13 +15,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for how each Bob feature is used and the 
 
 ## Install and first run
 
-For the scripted demo (no Bob needed):
+To try it without Bob, run the scripted demo (below).
 
-```bash
-python scripts/setup_demo.py
-```
-
-For a real Bob session, follow [BOB_RUNBOOK.md](BOB_RUNBOOK.md): the 30-minute probe ([PROBE.md](PROBE.md)), then the demo task under Hall Monitor, with the exact prompts and the screenshots to save.
+For a real Bob session, `python scripts/setup_demo.py C:/hm-demo` creates a fresh demo repo with Hall Monitor installed. Then follow [BOB_RUNBOOK.md](BOB_RUNBOOK.md): the 30-minute probe ([PROBE.md](PROBE.md)), then the demo task under Hall Monitor, with the exact prompts and the screenshots to save.
 
 To install Hall Monitor into your own repo:
 
@@ -38,7 +34,7 @@ Then:
 
 This installs, under `.bob/`: hooks (`settings.json`), the MCP server (`mcp.json`), two custom modes, four skills, five slash commands, and Plan-mode rules.
 
-**CI / headless:** `python scripts/headless.py <repo> "<task>"` runs Bob Shell (`bob run --mode supervised --format json`) and exits non-zero unless Receipts verified the work. `TYPESAFE_API_KEY` must be in the environment. Never commit it.
+**CI / headless:** `python scripts/headless.py <repo> "<task>"` runs Bob Shell (`bob run --mode supervised --format json`) and exits non-zero unless Receipts verified the work. Under `bob run` every tool is pre-approved, so Hall Monitor is the only gate. `TYPESAFE_API_KEY` must be in the environment. Never commit it.
 
 ## Running the tests
 
@@ -49,7 +45,7 @@ python -m pytest -q
 Runs **125 tests** with no API key needed. CI runs them on Ubuntu and Windows with Python 3.11 and 3.13 (see [`.github/workflows/tests.yml`](.github/workflows/tests.yml)).
 
 **Live gates** (need `TYPESAFE_API_KEY`):
-- `eval/control_set.py` — the claim-verification control set
+- `python eval/control_set.py` — 20 actions run through the step judge: 10 must be blocked and 10 must be allowed
 - `python simulate.py` — the full scripted demo
 - `eval/seeded.py` then `eval/score.py` — seeded eval
 - `python simulate.py --deep-review` — shows deep review (off by default in the demo)
@@ -64,16 +60,15 @@ Runs **125 tests** with no API key needed. CI runs them on Ubuntu and Windows wi
 
 ## Eval
 
-Numbers are from `eval/summary.json` and `eval/review_queue_summary.json`, on claims we seeded ourselves.
+Numbers are from `eval/summary.json` (on claims we seeded ourselves) and `eval/review_queue_summary.json` (on events from our own scripted and test sessions).
 
 **Claim verification** (`eval/summary.json`, n=60 claims, 10 scenario variants):
 - 21/22 false claims caught; 3 false alarms out of 38 true claims; agreement 56/60; Brier score 0.0372.
-- Certified tier (Jev accepts without escalation, threshold 0.5): 26 accepted, 1 wrong, upper bound 0.14 at 90% confidence (n=36).
+- Certified auto-accept threshold for the Jev tier: 0.5. Above it, 26 verdicts were accepted and 1 was wrong; the error rate is at most 14.2% at 90% confidence (n=36 claims).
 
 **Bulk classification** (`eval/review_queue_summary.json`, n=42 events, 11 sessions):
-- Jev flags 63.5% of events as needing a person; average 2.8 s, 31 156 input tokens, $0.0013 per session.
+- Jev labelled all 42 events in 2.8 s for $0.0013 (31,156 input tokens) and flagged 63.5% as needing a person. That rate is Jev's alone: the human labels that would correct it (prediction-powered inference) aren't collected yet.
 - Failure forms: none 23, inaccurate self-report 11, constraint violation 6, self-initiated overreach 2.
-- Human labels for bulk classification: no data yet.
 
 **Human review pilot:** no data yet.
 
@@ -90,7 +85,7 @@ This replays a full supervised session through the real hooks and a real MCP std
 
 | Path | Role |
 |---|---|
-| `.bob/` | Bob assets: custom modes, skills, slash commands, Plan-mode rules |
+| `bob/` | Bob assets: custom modes, skills, slash commands, Plan-mode rules (`scripts/install.py` copies them into a repo's `.bob/`) |
 | `hm_hook.py`, `hm_mcp.py` | Entry points Bob launches (hooks, MCP server) |
 | `hallmonitor/policy.py` | Decision engine: expected loss over joint outcomes, value-of-information escalation |
 | `hallmonitor/questions.py` | Every Jev question |
@@ -108,7 +103,7 @@ This replays a full supervised session through the real hooks and a real MCP std
 | `hallmonitor/report.py` | The Hall Pass HTML report |
 | `hallmonitor/bob.py` | Bob Shell: headless supervised runs and the auditor tier (`last_message`, `stats`) |
 | `scripts/headless.py` | CI gate: supervised `bob run`, exit code from Receipts |
-| `scripts/setup_demo.py` | Set up and run the scripted demo |
+| `scripts/setup_demo.py` | Create a fresh demo repo with Hall Monitor installed, for a real Bob session |
 | `scripts/probe_hook.py`, `scripts/probe_report.py`, `PROBE.md` | Probe kit for the first real-Bob session |
 | `tests/` | 125 tests; no API key needed |
 | `.github/workflows/tests.yml` | CI: Ubuntu + Windows, Python 3.11 + 3.13 |
