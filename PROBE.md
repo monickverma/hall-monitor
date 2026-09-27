@@ -20,7 +20,7 @@ Every screenshot you take here doubles as the **Bob task session evidence** the 
 2. Make sure `TYPESAFE_API_KEY` is set in the environment Bob runs in (for example with `setx`, then restart Bob). Never put it in a file in the repo.
 3. Open `C:/hm-probe` in Bob as a **trusted workspace**, because hooks respect workspace trust. Take these screenshots:
    - **Settings → Hooks** showing the five hooks.
-   - **Settings → MCP** showing `hall-monitor` connected with 6 tools.
+   - **Settings → MCP** showing `hall-monitor` connected with 7 tools.
 4. In Agent mode, send these prompts:
    - "Create notes.txt containing 'hello'" (triggers `write_file`)
    - "Change 'hello' to 'hi' in notes.txt" (triggers `apply_diff`)

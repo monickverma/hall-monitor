@@ -33,9 +33,11 @@ RUBRIC = {
                             "and changed tests re-run on the code before the change"),
     "step monitor": (0.20, 7.5, "Least-harm judgment of every intent; excuses named; code rules before Jev"),
     "robustness in real Bob": (0.15, 5.5, "Single-agent tasks verify in the first round in real Bob (docs, "
-                                          "/decisions x2), and the fixes for 16 earlier false alarms held there. The "
-                                          "parallel-subagent task ran without a send-back in its last run, but the "
-                                          "main agent reached the $1 cost cap before submitting its claims"),
+                                          "/decisions x2), and the fixes for 16 earlier false alarms held there. In "
+                                          "the parallel-subagent task's latest run both subagents verified with no "
+                                          "false block and the main agent submitted, but it was sent back once (rule "
+                                          "D2 'needs evidence' though no password code changed) and reached the "
+                                          "$1.50 cost cap while answering"),
     "explainability": (0.10, 8, "Hall Pass built from the session's own log; says why a task stopped"),
     "rules and plan": (0.10, 7, "Policy PDF and prompt lines become rules; plan gate on PLAN.md"),
     "drift and stalls": (0.05, 6, "Named stall patterns and checkpoints; one real false stall, fixed"),
@@ -77,14 +79,21 @@ def real_run(hm):
         [e for e in ev_main if e.get("stage") == "receipts"]
     judged = [e for e in ev if e.get("stage") in ("intent", "step", "plan", "spawn")]  # as report.py counts them
     stops = [e for e in judged if e.get("action") in ("block", "ask_human", "restate")]
-    allowed = {e.get("target") for e in ev if e.get("stage") == "step" and e.get("action") == "allow"}
+    # A stop was later allowed if a step on its target (an intent's targets are "a, b") was allowed AFTER it:
+    # an allow that came before the stop, under another agent's intent, doesn't make the stop a false one.
+    allows = [(i, e.get("target")) for i, e in enumerate(ev) if e.get("stage") == "step" and e.get("action") == "allow"]
+    at = {id(e): i for i, e in enumerate(ev)}
+
+    def later_allowed(s):
+        parts = {t.strip() for t in str(s.get("target") or "").split(", ")}
+        return any(j > at[id(s)] and t in parts for j, t in allows)
     stats = runs[-1].get("stats") or {}
     return {"name": hm.parent.name, "final": rounds[-1]["action"] if rounds else "none",
             "first": rounds[0]["action"] if rounds else "none",
             "send_backs": sum(1 for r in rounds if r.get("action") in ("send_back", "stuck")),
             "judged": len(judged), "stops": len(stops),
             "excuses": sum(1 for e in ev if e.get("pattern") and e.get("stage") != "stall"),
-            "stops_later_allowed": sum(1 for s in stops if s.get("target") in allowed),
+            "stops_later_allowed": sum(1 for s in stops if later_allowed(s)),
             "stalls": sum(1 for e in ev if e.get("stage") == "stall"),
             "subagents": sum(1 for e in ev if e.get("stage") in ("spawn", "subagent_return")),
             "doc_rules": sum(1 for d in jsonl(hm / "ledger.jsonl") if d.get("source") not in (None, "user")),
