@@ -6,24 +6,20 @@ its existing returns make the type obvious. If the tests still pass, nothing the
 function: it is pseudo-tested (Niedermayr et al., "Will my tests tell me if I break this code?", 2016;
 Descartes does the same for Java). Where gitutil.sabotage breaks one line, this removes the function.
 
-Every mutant runs in a temporary copy of the repository, never in the working tree. The copy is checked
-first: if the tests fail there unmutated, nothing is reported.
+Every mutant runs in a temporary copy of the repository (gitutil.copy_tree), never in the working tree.
+The copy is checked first: if the tests fail there unmutated, nothing is reported.
 
 Budget (config): max_extreme_mutants (default 3; 0 turns it off), extreme_timeout seconds per test run
 (default 60), and 3x that for the whole pass. Receipts adds the result to the sabotage evidence, so it
 reaches Jev exactly where sabotage results do (claims about tests, and deep looks).
 """
 import ast
-import os
-import shutil
-import subprocess
 import tempfile
 import time
 from pathlib import Path
 
 from . import gitutil
 
-SKIP_DIRS = {".git", ".hallmonitor", "node_modules", ".venv", "venv", "__pycache__", ".pytest_cache", ".tox"}
 DEFAULT_BY_TYPE = {"bool": "False", "int": "0", "float": "0", "str": '""'}
 
 
@@ -145,34 +141,6 @@ def targets(root, changes):
     return out
 
 
-def copy_repo(root, dest):
-    """Copy the files `git add -A` would snapshot (tracked plus untracked, not ignored) into `dest`."""
-    root, dest = Path(root), Path(dest)
-    files = gitutil.git(root, "ls-files", "-co", "--exclude-standard").splitlines()
-    if not files:  # not a git repository: copy the tree, minus caches and Hall Monitor's own state
-        shutil.copytree(root, dest, dirs_exist_ok=True, ignore=shutil.ignore_patterns(*SKIP_DIRS, "*.pyc"))
-        return
-    for f in files:
-        src = root / f
-        if src.is_file() and not f.endswith(".pyc") and not SKIP_DIRS & set(Path(f).parts):
-            (dest / f).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dest / f)
-
-
-def run_tests(root, cmd, timeout):
-    """The test command in the copy. The copy goes first on PYTHONPATH (so an editable install of the
-    original can't answer for it), and no bytecode is written (two mutants of one file can't share a
-    stale .pyc)."""
-    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1",
-           "PYTHONPATH": os.pathsep.join([str(root)] + [p for p in [os.environ.get("PYTHONPATH")] if p])}
-    try:
-        r = subprocess.run(cmd, cwd=root, shell=True, capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=timeout, env=env)
-        return r.returncode == 0
-    except subprocess.TimeoutExpired:
-        return False  # a hang counts as caught, like a failure
-
-
 def extreme(root, changes, cfg):
     """Run the extreme mutants. Returns the keys Receipts adds to its sabotage evidence."""
     limit = int(cfg.get("max_extreme_mutants", 3))
@@ -183,8 +151,8 @@ def extreme(root, changes, cfg):
         return {**out, "extreme_note": "no changed functions to test" if limit > 0 else "off"}
     deadline = time.time() + 3 * timeout
     with tempfile.TemporaryDirectory(prefix="hm-extreme-") as tmp:
-        copy_repo(root, tmp)
-        if not run_tests(tmp, cfg["test_command"], timeout):
+        gitutil.copy_tree(root, tmp)
+        if not gitutil.run_tests(tmp, cfg["test_command"], timeout, copy=True)["passed"]:
             return {**out, "extreme_note": "not run: the tests fail in a clean copy of the repo"}
         for t in found:
             if time.time() > deadline:
@@ -194,7 +162,7 @@ def extreme(root, changes, cfg):
             original = path.read_text(encoding="utf-8")
             path.write_text(t["mutated"], encoding="utf-8")
             try:
-                still_pass = run_tests(tmp, cfg["test_command"], timeout)
+                still_pass = gitutil.run_tests(tmp, cfg["test_command"], timeout, copy=True)["passed"]
             finally:
                 path.write_text(original, encoding="utf-8")
             out["extreme_mutants"] += 1

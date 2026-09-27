@@ -145,3 +145,28 @@ def test_receipts_show_pseudo_tested_functions_to_jev_bob_and_the_user(repo, mon
     report.write_hall_pass(Store(repo.root))
     page = (repo.dir / "hall-pass.html").read_text(encoding="utf-8")
     assert "Pseudo-tested:</span>" in page and "app/limits.py:label" in page
+
+
+# ---------------------------------------------------------------- sabotage runs in a copy too (v4.2)
+
+def test_sabotage_runs_in_a_copy_and_leaves_the_working_tree_alone(repo, monkeypatch):
+    before = tree_hash(repo.root)
+    changes = gitutil.changes(repo.root, repo.session()["base"])
+    seen = []
+    real = gitutil.run_tests
+    monkeypatch.setattr(gitutil, "run_tests", lambda root, *a, **k: seen.append(str(root)) or real(root, *a, **k))
+    sab = gitutil.sabotage(repo.root, changes, "python -m pytest -q", max_mutants=4)
+    assert sab["mutants"] == 4 and tree_hash(repo.root) == before
+    assert seen and all(root != str(repo.root) for root in seen)  # every run, the baseline included, in the copy
+    assert [(m["file"], m["line"]) for m in sab["survived"]] == [("app/limits.py", n) for n in (10, 11, 12)]  # label()
+
+
+def test_sabotage_falls_back_to_the_working_tree_when_the_copy_cannot_pass(repo):
+    (repo.root / ".gitignore").write_text("local_settings.py\n__pycache__/\n.pytest_cache/\n")
+    (repo.root / "local_settings.py").write_text("DEBUG = True\n")  # ignored by git, so not in the copy
+    (repo.root / "tests" / "test_settings.py").write_text("import local_settings\n\n\ndef test_it():\n    pass\n")
+    changes = gitutil.changes(repo.root, repo.session()["base"])
+    before = tree_hash(repo.root)
+    sab = gitutil.sabotage(repo.root, changes, "python -m pytest -q", max_mutants=4)
+    assert sab["mutants"] == 4 and [m["line"] for m in sab["survived"]] == [10, 11, 12]
+    assert tree_hash(repo.root) == before  # restored after each in-place mutant, as before v4.2
