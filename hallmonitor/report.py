@@ -6,6 +6,7 @@ import html
 import json
 from collections import Counter
 from pathlib import Path
+from . import panels  # v4.2 Hall Pass content
 
 from . import jev
 
@@ -281,6 +282,7 @@ def write_hall_pass(store):
 <h2>Timeline</h2><section><table>{''.join(rows)}</table></section>
 <h2>Decision ledger</h2><section><table>{''.join(ledger_rows) or '<tr><td>none</td></tr>'}</table></section>
 <h2>Receipts</h2><section><table>{rec or '<tr><td>No claims submitted yet</td></tr>'}</table></section>
+{panels.extra(store, receipts)}
 {stuck_html}
 <h2>Loops</h2><div class="feats">{loops_html}</div>
 {forms_html}

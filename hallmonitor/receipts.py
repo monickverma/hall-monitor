@@ -30,8 +30,9 @@ count), and the Stop hook as a backstop.
 import json
 import re
 import time
+from . import fabricated as FB, mutation  # v4.2 fabricated files, extreme mutation
 
-from . import bob, brief, evidence as EV, fabricated as FB, gitutil, jev, policy, questions as Q
+from . import bob, brief, evidence as EV, gitutil, jev, policy, questions as Q
 
 # Evidence for claims judged without citations (after the free retry, and Hall Monitor's own
 # obligation claims), per claim kind (less noise, fewer tokens).
@@ -220,6 +221,8 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp"):
     sab = gitutil.sabotage(store.root, changes, cfg["test_command"], cfg["max_mutants"]) if needs_sabotage \
         else {"mutants": 0, "killed": 0, "survived": [], "note": "not run"}
     changed_files = {f: c["status"] for f, c in changes.items()}
+    if needs_sabotage:  # v4.2 extreme mutation (mutation.py): pseudo-tested functions join the sabotage evidence
+        sab = {**sab, **mutation.extreme(store.root, changes, cfg)}
 
     def verdict_job(i, deep=False):
         c = claims[i]
@@ -385,6 +388,7 @@ def message(result):
         if result["risky_files"]:
             out.append("Riskiest changed files, worth the user's own look: " +
                        ", ".join(f for f, _ in result["risky_files"]))
+        out += [f"Also worth the user's look: {x}" for x in mutation.lines(sab)]  # v4.2 extreme mutation
         return "\n".join(out)
     out = [{"send_back": "Receipts: some claims are not backed by the evidence.",
             "needs_evidence": "Receipts: some claims don't cite their receipts yet. "
@@ -401,6 +405,7 @@ def message(result):
                 out.append(f"  {r['detail']}")
     for m in sab["survived"]:
         out.append(f"  evidence: tests still pass when {m['file']}:{m['line']} `{m['from']}` is changed to `{m['to']}`")
+    out += [f"  evidence: {x}" for x in mutation.lines(sab)]  # v4.2 extreme mutation
     if not result["tests"]["passed"]:
         out.append("  evidence: the fresh test run fails: " + " | ".join(result["tests"]["tail"][-2:]))
     if status == "send_back":
@@ -446,6 +451,7 @@ def report(result):
     out += ["", f"Fresh test run: {'pass' if t['passed'] else 'FAIL'} (`{t['command']}`)",
             f"Sabotage: {s['killed']}/{s['mutants']} mutants killed"]
     out += [f"- survived: {m['file']}:{m['line']} `{m['from']}` -> `{m['to']}`" for m in s["survived"]]
+    out += [f"- {x}" for x in mutation.lines(s)]  # v4.2 extreme mutation
     if result.get("checkpoint"):
         cp = result["checkpoint"]
         out += ["", f"Last checkpoint: {cp['checkpoint']} (`{cp['ref']}`, from {cp['from']})"]
