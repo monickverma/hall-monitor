@@ -10,7 +10,7 @@ from . import panels  # v4.2 Hall Pass content
 
 from . import jev
 
-CHIP = {"allow": ("ok", "allowed"), "approved": ("ok", "approved"), "accept": ("ok", "verified"),
+CHIP = {"restate": ("warn", "restate"), "allow": ("ok", "allowed"), "approved": ("ok", "approved"), "accept": ("ok", "verified"),
         "rebrief": ("warn", "rebriefed"), "approved_with_note": ("warn", "noted"), "audit": ("warn", "audit"),
         "block": ("bad", "blocked"), "rejected": ("bad", "rejected"), "send_back": ("bad", "sent back"),
         "ask_human": ("warn", "ask human"), "record": ("info", "recorded"), "reject": ("bad", "rejected"),
@@ -111,10 +111,11 @@ def write_hall_pass(store):
         if (store.dir / "receipts.json").exists() else None
     tok = sum(x.get("tokens", 0) for x in events)
     judged = [x for x in events if x.get("stage") in ("intent", "step", "plan", "spawn")]
-    stopped = [x for x in judged if x.get("action") in ("block", "ask_human")]
+    stopped = [x for x in judged if x.get("action") in ("block", "ask_human", "restate")]
     patterns = [x["pattern"] for x in events if x.get("pattern") and x.get("stage") != "stall"]  # stalls aren't excuses
     agents = {x.get("agent") for x in events if x.get("agent") and x.get("agent") != "main"}
-    last_r = [x for x in events if x.get("stage") == "receipts"]
+    from .receipts import task_rounds
+    last_r = task_rounds(events)  # the task's verdict is the main agent's, not a subagent's
     rounds = len(last_r)
     status = (last_r[-1]["action"] if last_r else "in_progress")
     stamp = {"accept": ("ok", "VERIFIED"), "send_back": ("bad", "SENT BACK"), "audit": ("warn", "AUDITING"),
@@ -222,6 +223,7 @@ def write_hall_pass(store):
         ("deep looks at suspect files", sum(1 for x in events if x.get("stage") == "intent" and x.get("suspect"))),
         ("fresh intents after a drifted subagent", sum(1 for x in events if x.get("stage") == "step"
                                                        and "drifted subagent" in (x.get("note") or ""))),
+        ("restated", sum(1 for x in events if x.get("action") == "restate")),
         ("escalations", sum(1 for x in events if x.get("escalated"))),
         ("asked you", sum(1 for x in events if "ask_human" in (x.get("action"), x.get("verdict")))),
     ]

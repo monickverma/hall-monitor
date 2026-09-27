@@ -1,0 +1,2 @@
+{"id": "D1", "text": "Add a \"Rate limiting\" section to README.md that documents the planned limit of 5 login attempts per user per minute, kept in memory.", "source": "user", "kind": "obligation", "recorded_at": "2026-09-27T11:22:30+00:00", "supersedes": null}
+{"id": "D2", "text": "Change only README.md.", "source": "user", "kind": "limit", "recorded_at": "2026-09-27T11:22:30+00:00", "supersedes": null}

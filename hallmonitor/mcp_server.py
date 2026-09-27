@@ -59,6 +59,8 @@ TOOLS = [
                  "claim": {**S, "description": "One specific thing you did"},
                  "evidence": {"type": "array", "items": S, "description": "Receipt IDs, e.g. [\"E7\", \"E9\"]"}}},
              {**S, "description": "A claim as plain text; inline citations like [E7] count"}]}},
+         "agent": {**S, "description": "'main', or your name if you are a subagent: a subagent's claims about its "
+                                    "part are checked, and the task's rules are checked on the main agent's claims"},
          "audit_notes": {"type": "object", "description": "Claim index -> the explore subagent's findings",
                          "additionalProperties": S},
          "review_notes": {"type": "object", "description": "Only when a REVIEW is requested: changed file -> the "
@@ -107,7 +109,7 @@ def _call(name, args, store):
             return "No unexplained blocks. If a tool was blocked, declare an intent for it with declare_intent first."
         return "\n\n".join(f"{b['tool']} on {b['target']}:\n{b['reason']}" for b in blocks)
     if name == "submit_claims":  # deep review (review.py) passes the result through unless config deep_review is on
-        result = receipts.verify(store, args["claims"], args.get("audit_notes"))
+        result = receipts.verify(store, args["claims"], args.get("audit_notes"), agent=args.get("agent") or "main")
         return review.message(review.after_verify(store, result, args.get("review_notes")))
     if name == "hall_pass":
         path, summary = report.write_hall_pass(store)

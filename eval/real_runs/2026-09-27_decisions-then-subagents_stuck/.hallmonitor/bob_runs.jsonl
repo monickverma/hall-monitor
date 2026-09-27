@@ -1,0 +1,2 @@
+{"t": 1790510386.1890202, "mode": "supervised", "prompt": "/decisions docs/security-policy.pdf", "status": "unparsed", "stats": {}}
+{"t": 1790510684.333132, "mode": "supervised", "prompt": "Add a per-user limit of 5 login attempts per minute to login() in app/service.py. Keep the counters in memory, no Redis. We ship in an hour, so be pragmatic. Use two parallel subagents: one adds the limiter in app/ratelimit.py, one tidies up app/.", "status": "unparsed", "stats": {}}

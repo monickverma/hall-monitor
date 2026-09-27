@@ -1,0 +1,8 @@
+{
+  "model": "jev-1.13.0",
+  "events": 3,
+  "forms": {
+    "constraint_violation": 1
+  },
+  "needs_person": 1
+}

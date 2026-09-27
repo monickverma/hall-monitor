@@ -142,6 +142,14 @@ def declare_intent(store, intent, files=(), commands=(), agent="main", agent_tas
                    "ms": int((time.time() - t0) * 1000)})
         return f"{row['id']} needs the user's decision before you continue:\n{why}\nAsk the user."
 
+    if commands and not files and not sess["failed_step"] and all(re.match(cfg["safe_commands"], c) for c in commands):
+        # Only safe commands (the test command, git status, ...), which PreToolUse allows without Jev anyway.
+        # Real Bob, Sept 27: Jev was unsure about "run python -m pytest -q", so Bob stopped to ask the user.
+        row = store.add_intent({**base, "verdict": "approved", "why": ""})
+        store.log({"stage": "intent", "agent": agent, "target": target, "reason": intent[:300], "action": "allow",
+                   "verdict": "approved", "note": "safe commands only", "ms": int((time.time() - t0) * 1000)})
+        return f"{row['id']} approved. Go ahead: {target}."
+
     failed = sess["failed_step"]
     suspect = [f for f in files if f in sess["suspect_files"]]  # v4 loop L4 -> L1
     try:
@@ -157,6 +165,11 @@ def declare_intent(store, intent, files=(), commands=(), agent="main", agent_tas
         return f"{row['id']}: Hall Monitor couldn't check this; ask the user."
     verdict = VERDICT[d.action]
     why = explain(store, d, detail) if verdict != "approved" else ""
+    # v4 "restate" verdict (Ctrl-Z for an uncertain step): the first time Jev is unsure about an agent's intent,
+    # the agent restates it precisely; only an intent that is still unclear goes to the user.
+    mine = [it for it in sess["intents"] if it.get("agent") == agent]
+    if verdict == "ask_human" and not (mine and mine[-1]["verdict"] == "restate"):
+        verdict = "restate"
     unhandled = failed is not None and detail.get("handles_failure", 1.0) < 0.5
     if unhandled and verdict == "approved":
         verdict = "approved_with_note"
@@ -171,7 +184,8 @@ def declare_intent(store, intent, files=(), commands=(), agent="main", agent_tas
             s["fresh_intent_needed"].pop(f, None)
     store.save_session(s)
     store.log({"stage": "intent", "agent": agent, "target": target,
-               "reason": intent[:300], **d.as_dict(), "verdict": verdict,
+               "reason": intent[:300], **d.as_dict(), **({"action": "restate"} if verdict == "restate" else {}),
+               "verdict": verdict,
                "pattern": detail["pattern"] if d.risks.get("rationalizing", 0) >= 0.5 else None,
                "violations": {k: round(v, 3) for k, v in detail["violations"].items()},
                "conflicts": detail["conflicts"], "escalated": detail.get("escalated"),
@@ -189,6 +203,10 @@ def declare_intent(store, intent, files=(), commands=(), agent="main", agent_tas
         return f"{row['id']} approved, but stay on the goal: {store.session().get('goal')}\n{why}"
     if verdict == "ask_human":
         return f"{row['id']} needs the user's confirmation before you proceed:\n{why}\nAsk the user."
+    if verdict == "restate":
+        return (f"{row['id']}: Hall Monitor isn't sure about this intent:\n{why}\n"
+                "Call declare_intent again, saying exactly which change you'll make, in which files, and how it "
+                "serves the goal. If it's still unclear, the user will be asked.")
     return (f"{row['id']} REJECTED. Do not do this:\n{why}\n"
             "Choose an approach that respects the active decisions, or ask the user to change them.")
 

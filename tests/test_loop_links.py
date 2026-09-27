@@ -50,3 +50,18 @@ def test_a_drifted_subagents_files_need_a_fresh_intent(tmp_path, monkeypatch):
     step.declare_intent(store, "Restore the limit of 5 after checking the subagent's change",
                         files=["app/ratelimit.py"])
     assert hook.handle(edit)[0] == 0 and not Store(store.root).session()["fresh_intent_needed"]
+
+
+def test_an_unsure_intent_is_restated_once_before_the_user_is_asked(tmp_path, monkeypatch):
+    """v4 "restate" verdict: the first unsure intent goes back to the agent, the second to the user."""
+    from hallmonitor import policy
+    store = repo(tmp_path)
+    unsure = policy.Decision("ask_human", {"ask_human": 1.0}, 0.0, risks={"violates_D1": 0.5})
+    monkeypatch.setattr(step, "judge", lambda *a, **k: (unsure, {"violations": {}, "conflicts": {}, "tokens": 0,
+                                                                 "pattern": None}))
+    first = step.declare_intent(store, "Change things in app/service.py", files=["app/service.py"])
+    assert "declare_intent again" in first
+    assert Store(store.root).session()["intents"][-1]["verdict"] == "restate"
+    assert [e["action"] for e in store.events() if e["stage"] == "intent"] == ["restate"]
+    second = step.declare_intent(store, "Add a limit check to login() in app/service.py", files=["app/service.py"])
+    assert "Ask the user" in second and Store(store.root).session()["intents"][-1]["verdict"] == "ask_human"
