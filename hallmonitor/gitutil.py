@@ -276,7 +276,7 @@ def sabotage(root, changes_, cmd, max_mutants=4):
     The mutants run in a scratch copy of the repository, so the working tree is never touched: a
     parallel subagent can't read a mutated file or lose an edit to the restore, the IDE never shows a
     file flicker, and a hook killed mid-run can't leave a mutant behind. If the unmutated copy fails its
-    tests (a file the tests need is ignored by git, say), the mutants run in place, as before v4.2.
+    tests (a file the tests need is ignored by git, say), no mutants run.
     """
     plan = plan_mutants(root, changes_, max_mutants)
     if not plan:
@@ -284,8 +284,12 @@ def sabotage(root, changes_, cmd, max_mutants=4):
     results = []
     with tempfile.TemporaryDirectory(prefix="hm-sabotage-", ignore_cleanup_errors=True) as tmp:
         copy_tree(root, tmp)
-        in_copy = run_tests(tmp, cmd, timeout=60, copy=True)["passed"]
-        where = tmp if in_copy else root
+        # The working tree is never mutated: a parallel subagent's edit made during a mutant's run was lost to the
+        # restore, and a tree failing for another reason scored every mutant killed (audit sweep, Sept 28). If the
+        # copy can't pass its tests, there is no sabotage evidence, and Receipts says so.
+        if not run_tests(tmp, cmd, timeout=60, copy=True)["passed"]:
+            return {"mutants": 0, "killed": 0, "survived": [], "skipped": "the tests don't pass in a clean copy"}
+        where, in_copy = tmp, True
         for path, lineno, text, mutated in plan:
             p = Path(where) / path
             original = p.read_text(encoding="utf-8")

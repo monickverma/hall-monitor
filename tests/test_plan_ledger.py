@@ -45,11 +45,15 @@ def test_a_plan_md_write_goes_through_the_gate(tmp_path, monkeypatch):
 
 
 def test_decisions_are_recorded_superseded_and_protected_by_authority(tmp_path, monkeypatch):
-    store = Store(tmp_path)
+    from conftest import make_repo
+    store = make_repo(tmp_path, {"docs/policy.pdf": "policy\n"})  # a document counts only if the repo tracks it
     monkeypatch.setattr(jev, "ask", FakeJev(scope="limit"))
     out = ledger.record_decision(store, "Keep the counters in memory.", "docs/policy.pdf §2", quote="In memory.")
     assert out == "Recorded D1 (limit, checked on every action): Keep the counters in memory."
     monkeypatch.setattr(jev, "ask", FakeJev(scope="limit", contra=0.95))  # contradicts every active decision
+    s = store.session()
+    s["user_rule_sentences"] = ["Actually, use Redis for the counters."]  # only a rule the user said is the user's
+    store.save_session(s)
     out = ledger.record_decision(store, "Use Redis for the counters.", "user")
     assert "supersedes D1" in out  # the user has at least a document's authority
     assert [d["id"] for d in store.active_decisions()] == ["D2"]

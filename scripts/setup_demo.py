@@ -24,11 +24,16 @@ def main(dest, probe=False, force=False):
         if not force:
             sys.exit(f"{dest} already exists. Add --force to replace it.")
         shutil.rmtree(dest, onerror=lambda f, p, e: (Path(p).chmod(0o700), f(p)))
-    shutil.copytree(HERE / "demo" / "template", dest)
+    # Compiled files left in the template by local test runs were committed into demo repos, and every later test
+    # run showed up as a change in the diff Receipts judges (real Bob, Sept 28).
+    shutil.copytree(HERE / "demo" / "template", dest, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     git = ["git", "-c", "user.name=demo", "-c", "user.email=demo@example.com", "-c", "core.autocrlf=false"]
     for args in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "Demo login service: starting point"]):
         subprocess.run(git + args, cwd=dest, check=True)
     install.main(dest, probe=probe)
+    # install adds .hallmonitor/ to .gitignore; left uncommitted, it showed up as a change in every task's Receipts
+    for args in (["add", ".gitignore"], ["commit", "-qm", "Ignore Hall Monitor's records"]):
+        subprocess.run(git + args, cwd=dest, check=True)
     print(f"\nDemo repo ready: {dest}")
     print("Next: open it in Bob as a trusted workspace, then follow "
           + ("PROBE.md step 3." if probe else "BOB_RUNBOOK.md step 3."))

@@ -53,6 +53,10 @@ EVIDENCE_FOR = {
 }
 TEST_KINDS = {"tests_pass", "tests_added", "fixed"}
 CHANGE_KINDS = {"implemented", "fixed", "tests_added", "other_claim"}
+READ_CLAIM_RE = re.compile(r"^\s*(read|reviewed|inspected|extracted|opened|listed|checked|looked at|examined|parsed|"
+                           r"scanned|searched|confirmed)\b", re.I)
+CHANGE_VERB_RE = re.compile(r"\b(add|added|change|changed|modif\w+|updat\w+|wrote|writ\w+|creat\w+|remov\w+|delet\w+|"
+                            r"fix\w*|implement\w*|edit\w*|replac\w+|refactor\w*|renam\w+|wired)\b", re.I)
 SABOTAGE_KINDS = {"tests_added", "tests_pass", "implemented", "fixed", "obligation"}  # worth running sabotage
 SHOW_SABOTAGE = {"tests_added", "obligation"}  # sabotage is about test quality; other claims aren't judged on it
 JEV_TIERS = {"jev", "jev_deep", "jev+audit", "bob_shell_audit"}  # verdicts kept for a resubmission (verify)
@@ -67,6 +71,9 @@ HEADER_TAG = "from the header:"
 HEADER_TAG_RE = re.compile(r" \[from the header: [^\]]*\]$")
 BULLET_RE = re.compile(r"^([-*\u2022]|\d+[.)])\s+")
 MD_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+TABLE_ROW_RE = re.compile(r"^\|.*\|$")
+TABLE_SEP_RE = re.compile(r"^\|?\s*:?-{3,}")
+RULE_CELL_RE = re.compile(r"^(D\d+\b|rules?$)", re.I)
 
 
 def _under_headers(text):
@@ -79,6 +86,14 @@ def _under_headers(text):
     out, tag = [], ""
     for k, line in enumerate(body):
         nxt = body[k + 1] if k + 1 < len(body) else ""
+        # A markdown table: real Bob, Sept 28, recapped its work as "| Rule | Status |" rows, and every row, header
+        # included, came back needing evidence until a one-line docstring task was STUCK. Header and separator rows
+        # aren't claims; a row about a rule (D2 ...) restates what Receipts checks itself; other rows are one claim.
+        if TABLE_ROW_RE.match(line):
+            cells = [c.strip(" *`") for c in line.strip().strip("|").split("|")]
+            if TABLE_SEP_RE.match(line) or TABLE_SEP_RE.match(nxt) or RULE_CELL_RE.match(cells[0]):
+                continue
+            line = " - ".join(c for c in cells if c)
         if line.startswith("#") or line.endswith(":"):  # headings and introductions are never claims
             tag = ""
             if line.endswith(":") and (BULLET_RE.match(nxt) or nxt.endswith(":")):
@@ -426,28 +441,31 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
             if kind == "not_a_claim" and isinstance(claims_or_summary, str):
                 continue
             claims.append({"claim": text, "kind": kind, "cited": cited, "from": "agent"})
-    # Obligations from the ledger are implicit claims: the finished work must satisfy them. With no edit in
-    # the evidence ledger there is no work for them to apply to: real Bob, Sept 27, a /decisions turn was
-    # asked to prove "Changes to app/auth.py require a security review" and spent its cost cap trying.
+    # .bob/ and .hallmonitor/ are Hall Monitor's own (installed after the base commit in a demo repo), and
+    # Bob can't write them: real Bob, Sept 27, they were the only "code" in a docs task's diff.
+    all_changes = {f: c for f, c in gitutil.changes(store.root, sess.get("base")).items()
+                   if not is_protected(store.root, f)}
+    # Obligations from the ledger are implicit claims: the finished work must satisfy them. With no work for them
+    # to apply to, they're skipped: real Bob, Sept 27, a /decisions turn was asked to prove "Changes to
+    # app/auth.py require a security review" and spent its cost cap trying. The work is an edit in the evidence
+    # ledger or a change in the diff: a tool that leaves no edit receipt (a shell command that writes a file)
+    # must not skip the rules (security audit, Oct 2).
     # A subagent's submission covers its part: the project's rules are about the finished work, so they're
     # checked on the main agent's. Real Bob, Sept 27: a tidy-up subagent's three submissions were held to every
     # rule and used up the task's send-backs before the main agent submitted.
-    if agent == "main" and any(r.get("kind") == "edit" for r in store.evidence()):
+    if agent == "main" and (all_changes or any(r.get("kind") == "edit" for r in store.evidence())):
         claims += [{"claim": f"The finished work satisfies the project rule {d['id']}: \"{d['text']}\"",
                     "kind": "obligation", "cited": [], "from": "ledger", "rule": d["text"]}
                    for d in store.active_decisions(kind="obligation")]
     # Audit notes count only for audits Hall Monitor requested in the last round, on the same claim.
     # Anything else is ignored, so attaching notes can't be used to skip a send-back round.
-    requested = sess.get("pending_audits") or {}
-    offered = {int(k): v for k, v in (audit_notes or {}).items()}
+    requested = (sess.get("pending_audits") if agent == "main" else
+                 (sess.get("agent_pending_audits") or {}).get(agent)) or {}
+    offered ={int(k): v for k, v in (audit_notes or {}).items()}
     audit_notes = {i: v for i, v in offered.items()
                    if 0 <= i < len(claims) and requested.get(str(i)) == claims[i]["claim"]}
     resubmit = bool(audit_notes)  # the same round, completed with the requested audit
 
-    # .bob/ and .hallmonitor/ are Hall Monitor's own (installed after the base commit in a demo repo), and
-    # Bob can't write them: real Bob, Sept 27, they were the only "code" in a docs task's diff.
-    all_changes = {f: c for f, c in gitutil.changes(store.root, sess.get("base")).items()
-                   if not is_protected(store.root, f)}
     docs = {cfg["claims_file"].lower()}
     changes = {f: c for f, c in all_changes.items()
                if f.lower() not in docs and not f.lower().endswith((".md", ".txt", ".rst", ".pdf"))}
@@ -469,7 +487,10 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
         # A header's files tell where an item is; they aren't what a claim that something stayed the
         # same is about ("First line kept as ..." under a README.md header).
         said = HEADER_TAG_RE.sub("", c["claim"]) if c["kind"] == "unchanged" else c["claim"]
-        c["named"] = named_files(said, known) if c["from"] == "agent" else []
+        # A claim that files were only read names them without saying they changed. Real Bob, Sept 28: "Read
+        # docs/security-policy.pdf and extracted its text" was contradicted three rounds running as a diff mismatch.
+        reading = READ_CLAIM_RE.match(said) and not CHANGE_VERB_RE.search(said)
+        c["named"] = named_files(said, known) if c["from"] == "agent" and not reading else []
         # The diff Jev is shown. A rule's own files count too: real Bob, Sept 27, "The finished work satisfies
         # D1: Add a section to README.md" was judged on a diff without README.md and contradicted every round.
         c["where"] = named_files(c["claim"], known)
@@ -665,7 +686,13 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
         elif status == "accept":
             sess["last_send_back"] = None
     # The audits requested this round; only notes for these (same index, same claim) count next time.
-    sess["pending_audits"] = {str(a["index"]): a["claim"] for a in audits}
+    # Kept per agent: a subagent's round must not replace the main agent's audits (audit sweep, Sept 28).
+    requested_now = {str(a["index"]): a["claim"] for a in audits}
+    if agent == "main":
+        sess["pending_audits"] = requested_now
+    else:
+        sess.setdefault("agent_pending_audits", {})[agent] = requested_now
+    sess.setdefault("audit_briefs", {})[agent] = [a["brief"] for a in audits]  # step.requested_audit matches these
     if agent == "main":
         sess["send_backs"] = count
     else:
@@ -674,10 +701,10 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
         sess["verified_edit_seq"] = sess["edit_seq"]
     # v4 loop L4 -> L1: the files a contradicted claim names are suspect, so the next intent or edit that
     # touches them gets the deep look straight away. A verified round clears them.
-    sess["suspect_files"] = {} if status == "accept" else {
-        **sess.get("suspect_files", {}),
-        **{f: r["claim"][:160] for r in rows if r["state"] == "contradicted"
-           for f in (claims[r["index"]].get("where") or [])}}
+    # Only the main agent's verified round clears them: a subagent's accepted round covers its own part only.
+    suspect = {f: r["claim"][:160] for r in rows if r["state"] == "contradicted"
+               for f in (claims[r["index"]].get("where") or [])}
+    sess["suspect_files"] = {} if status == "accept" and agent == "main" else {**sess.get("suspect_files", {}), **suspect}
     store.save_session(sess)
 
     cps = EV.checkpoints(store.evidence())

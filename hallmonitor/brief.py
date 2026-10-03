@@ -3,13 +3,26 @@ import re
 import time
 from pathlib import Path
 
-from . import gitutil, jev, lessons, payload as P, questions as Q
+from . import gitutil, jev, ledger, lessons, payload as P, questions as Q
 
 
-def sentences(text, limit=12):
-    parts = re.split(r"(?<=[.!?])\s+|\n+", text or "")
+# Lines of a pasted traceback, log, shell session or code block: not something the user says.
+LOG_LINE_RE = re.compile(r"^(\s{2,}\S|\t|Traceback \(|File \"|\s*at \S+\(|[A-Z]\w*(Error|Exception|Warning):|>>> |\$ |"
+                         r"PS [A-Z]:\\|[A-Z]:\\\S+>|```|E\s{2,}|FAILED |PASSED |=+ |-{3,})")
+SHORT_RULE_RE = re.compile(r"\b(no|not|only|never|don['’]t)\b", re.I)
+
+
+def prose(text):
+    return "\n".join(l for l in (text or "").splitlines() if not LOG_LINE_RE.match(l)).strip() or (text or "")
+
+
+def sentences(text, limit=12, short_rules=False):
+    """The prose sentences of a prompt. Real risk, Sept 28: a rule after a pasted 13-line traceback was never judged
+    (the log filled all 12 slots), and two-word rules like "No Redis." were dropped as too short (`short_rules`)."""
+    parts = re.split(r"(?<=[.!?])\s+|\n+", prose(text))
     out = [re.sub(r"^\s*([-*]|\d+[.)])\s*", "", s).strip() for s in parts]
-    return [s for s in out if len(s.split()) >= 3][:limit]
+    return [s for s in out if len(s.split()) >= 3
+            or (short_rules and len(s.split()) == 2 and SHORT_RULE_RE.search(s))][:limit]
 
 
 def _brief(store, extra=None, optional=None):
@@ -48,13 +61,14 @@ def _brief(store, extra=None, optional=None):
 def session_start(p, store):
     seeds, tok = store.agents_md_decisions(), 0
     if seeds:
-        answers, usage = jev.ask({"decisions": seeds},
-                                 {f"scope_{i}": Q.decision_scope(f"`decisions[{i}]`") for i in range(len(seeds))})
+        scoped, usage = ledger.scope(store, seeds)
         tok = jev.tokens(usage)
-        for i, text in enumerate(seeds):
-            store.add_decision(text, "AGENTS.md", kind=answers[f"scope_{i}"]["choice"])
+        for text, (kind, one_step) in zip(seeds, scoped):
+            store.add_decision(text, "AGENTS.md", kind=kind, per_action=one_step)
     sess = store.session()
-    sess.update(base=gitutil.head(store.root), actions=[], commands=[], off_task_streak=0)
+    # A new session: rules the user stated in an earlier one no longer apply (store.active_decisions)
+    sess.update(base=gitutil.head(store.root), actions=[], commands=[], off_task_streak=0,
+                session_id=f"S{int(time.time() * 1000)}", user_rule_sentences=[], unjudged_sentences=[])
     store.save_session(sess)
     learned = lessons.brief_lines(store)  # v4.2: the last session's lessons, read before this one is logged
     store.log({"stage": "session_start", "action": "brief", "decisions": len(store.active_decisions()),
@@ -82,7 +96,11 @@ def user_prompt(p, store):
     t0 = time.time()
     text = P.prompt(p)
     sess = store.session()
-    sents = sentences(text)
+    sents = sentences(text, short_rules=True)
+    # Kept before Jev is asked: if Jev refuses, the hook tells Bob to record the user's rules with record_decision,
+    # and those must still count as the user's (ledger.said_by_user).
+    sess["unjudged_sentences"] = sents
+    store.save_session(sess)
     active = store.active_decisions()
     # Speculative fan-out: whether it's a new task, which sentences are decisions, and (for every
     # sentence x active decision) whether it contradicts that decision. Code uses what applies.
@@ -90,6 +108,7 @@ def user_prompt(p, store):
     for i in range(len(sents)):
         qs[f"decision_{i}"] = Q.is_decision(i)
         qs[f"scope_{i}"] = Q.decision_scope(f"stated in `sentences[{i}]`")
+        qs[f"one_step_{i}"] = Q.breaks_in_one_step(f"stated in `sentences[{i}]`")
         for d in active:
             qs[f"contra_{i}_{d['id']}"] = Q.sentence_contradicts(i, d["id"])
     state = {"prompt": text[:2000], "current_goal": sess.get("goal"), "sentences": sents,
@@ -99,19 +118,24 @@ def user_prompt(p, store):
 
     new_task = sess.get("goal") is None or answers["new_task"]["noul"] >= 0.5
     if new_task:
-        sess["goal"] = text[:600]
+        sess["goal"] = prose(text)[:600]
         # A new task starts its own Receipts rounds. Real Bob, Sept 27: a task began one send-back from STUCK
         # because the count from the task before it (a /decisions turn) carried over.
         sess.update({"send_backs": 0, "last_send_back": None, "uncited_retry_used": False, "pending_audits": {},
-                     "suspect_files": {}, "fresh_intent_needed": {}})
+                     "agent_pending_audits": {}, "audit_briefs": {}, "suspect_files": {}, "fresh_intent_needed": {}})
     sess["stalls"] = 0  # the user has stepped in: the stall counter starts again
+    # What the user said as rules (ledger.said_by_user): a looser bar than recording, since Bob may re-record one
+    sess["user_rule_sentences"] = (sess.get("user_rule_sentences", []) +
+                                   [s for i, s in enumerate(sents) if answers[f"decision_{i}"]["noul"] >= 0.5])[-30:]
+    sess["unjudged_sentences"] = []
     added = []
     for i, s in enumerate(sents):
         if answers[f"decision_{i}"]["noul"] < 0.6:
             continue
         hits = [d["id"] for d in active if answers[f"contra_{i}_{d['id']}"]["noul"] >= 0.7]
         row = store.add_decision(s, "user", kind=answers[f"scope_{i}"]["choice"],
-                                 supersedes=hits[0] if hits else None)
+                                 supersedes=hits[0] if hits else None,
+                                 per_action=answers[f"one_step_{i}"]["noul"] >= 0.5, session=sess.get("session_id"))
         added.append(row)
     store.save_session(sess)
 

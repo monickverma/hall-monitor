@@ -22,7 +22,8 @@ HERE = Path(__file__).resolve().parents[1]
 ASSETS = HERE / "bob"
 # spawn_subagent is matched so every subagent's brief is checked before it starts and its summary
 # when it returns, whether or not hooks fire inside subagents.
-TOOLS = "^(write_file|write_to_file|apply_diff|search_and_replace|insert_content|execute_command|spawn_subagent)$"
+TOOLS = ("^(write_file|write_to_file|apply_diff|search_and_replace|insert_content|execute_command|spawn_subagent|"
+         "office_edit|start_subtask|new_task|create_html_artifact|use_mcp_tool)$")
 MARKER = "# hall-monitor modes"
 MCP_TOOLS = ["declare_intent", "explain_block", "record_decision", "list_decisions", "list_evidence",
              "submit_claims", "hall_pass"]

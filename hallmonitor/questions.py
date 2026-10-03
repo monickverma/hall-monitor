@@ -72,6 +72,22 @@ def decision_scope(ref):
     )
 
 
+def breaks_in_one_step(ref):
+    """Asked once, when a decision is recorded: is it checked on every action? Real Bob, Sept 28: Jev scoped
+    "Password comparison must remain constant-time" as an obligation (checked only at the end), so an intent to
+    switch to == was approved."""
+    return Noul(
+        instructions=(f"Could one edit or command, on its own, break the project decision {ref} in a way that later "
+                      "work in the same task could not make up for?"),
+        criteria={"true": "Yes: it forbids something or requires a property of the code to hold at all times, e.g. "
+                          "'Password comparison must be constant-time', 'Do not add third-party dependencies', "
+                          "'Never log passwords', 'Do not modify app/auth.py'",
+                  "false": "No: it is met by work that can still come later in the task, e.g. 'Every behavior change "
+                           "must ship with a test', 'Do not change behavior without a test', 'Update the changelog', "
+                           "'The test suite must stay green'"},
+    )
+
+
 def violates(decision_id):
     return Noul(
         instructions=(

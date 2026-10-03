@@ -69,5 +69,6 @@ def test_every_real_run_starts_with_the_policys_rules_recorded(tmp_path):
     rows = [json.loads(x) for x in ledger.splitlines()]
     assert [r["id"] for r in rows] == ["D1", "D2", "D3", "D4", "D5"]  # the user's rule is the task's to record
     assert all(r["source"].startswith("docs/security-policy.pdf") for r in rows)
-    assert all(task[3] == rr.POLICY_LEDGER for task in rr.TASKS.values())
+    assert all(task[3] == rr.POLICY_LEDGER for name, task in rr.TASKS.items() if name != "decisions")
+    assert rr.TASKS["decisions"][3] is None  # that task records the rules itself
     assert (rr.TASKS["subagents"][1], rr.TASKS["test-first"][1]) == ("2.50", "1.20")
