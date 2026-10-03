@@ -7,6 +7,7 @@ PreToolUse then enforces it: no covering intent means no edit, a rejected intent
 and an edit that does something other than what was declared is blocked.
 """
 import fnmatch
+import json
 import re
 import sys
 import time
@@ -27,6 +28,7 @@ INSTALL_RE = re.compile(r"\b(install|add|develop)\b", re.I)
 MANIFEST_RE = re.compile(r"requirements[\w.-]*\.(txt|in)|pyproject\.toml|setup\.(py|cfg)|pipfile|poetry\.lock|"
                          r"package(-lock)?\.json|environment\.ya?ml", re.I)
 DOC_FILES = (".md", ".rst")
+HALL_PASS_RE = re.compile(r"hall[- _]?pass", re.I)
 
 
 def _imports(text):
@@ -76,6 +78,102 @@ def adds_no_dependency(root, action):
     new = {m for m in _imports(action.get("content")) if m and m not in sys.stdlib_module_names and m != "__future__"}
     return not new or new <= _repo_modules(root)
 
+PROTECTED_NAMES = (".bob", ".hallmonitor")
+PROTECTED_TOKEN_RE = re.compile(r"(?:^|[\s'\"=/\(,])([\w*?~.\[\]-]+)(?=[/\\\s'\")]|$)")
+SHORT_NAME_RE = re.compile(r"^\.?(hallmo|bob)\w*~\d+$")
+READ_ONLY_RE = re.compile(r"^\s*(cat|type|ls|dir|more|head|tail|get-content|get-childitem|get-item|test-path|"
+                          r"get-filehash|resolve-path|get-location|pwd|gc|gci|gi|findstr|select-string|"
+                          r"git\s+(status|diff|log|show|ls-files|blame|rev-parse))\b", re.I)
+# Read-only filters a safe command may be piped into, and what makes a command more than the one safe command it
+# starts with: a redirect, a chained or backgrounded command, a sub-expression or a block. `cat x > app/auth.py`
+# matched the safe prefix `cat`, and so would `ls & rm x` or `cat (Remove-Item x)`. `2>&1` only merges streams.
+PIPE_FILTER_RE = re.compile(r"^\s*(select-string|select-object|sort-object|measure-object|findstr|grep|sort|head|"
+                            r"tail|wc|more|out-string|format-\w+)\b", re.I)
+UNSAFE_SHELL_RE = re.compile(r">|<|;|&|\(|\)|\{|\}|\|\||`|\$|\n")
+STREAM_MERGE_RE = re.compile(r"\d?>&\d")
+
+
+def names_protected(command):
+    """True when a command names .bob/ or .hallmonitor/ in any form: the plain name, a wildcard that matches it
+    (.hallmon*, .b?b, .*), or a Windows 8.3 short name (HALLMO~1)."""
+    for m in PROTECTED_TOKEN_RE.finditer(command or ""):
+        tok = m.group(1).lower()
+        if SHORT_NAME_RE.match(tok) or (tok.startswith(".") and any(fnmatch.fnmatch(n, tok) for n in PROTECTED_NAMES)):
+            return True
+    return False
+
+
+def is_plain_read(command):
+    """One read-only command, optionally piped through read-only filters, with no redirect, chaining or substitution."""
+    cmd = STREAM_MERGE_RE.sub("", command or "")
+    if not cmd.strip() or UNSAFE_SHELL_RE.search(cmd):
+        return False
+    first, *rest = cmd.split("|")
+    return bool(READ_ONLY_RE.match(first)) and all(PIPE_FILTER_RE.match(p) for p in rest)
+
+
+def touches_protected(command):
+    """A command that names .bob/ or .hallmonitor/ and isn't a plain read. The edit tools were always stopped from
+    changing them; a shell command (rm, Set-Content, python -c open(...), `cd .bob && ...`) could have."""
+    return names_protected(command) and not is_plain_read(command)
+
+
+def is_safe_command(cfg, command):
+    """The command is one the config calls safe (tests, git status, plain reads), optionally piped through read-only
+    filters, and nothing else. Real Bob, Sept 27-28: `Get-Content tests\\test_service.py` was blocked for want of a
+    declared intent."""
+    cmd = STREAM_MERGE_RE.sub("", command or "")
+    if not cmd.strip() or UNSAFE_SHELL_RE.search(cmd) or touches_protected(command):
+        return False
+    first, *rest = cmd.split("|")
+    safe = cfg["safe_commands"]
+    return bool(re.match(safe, first) or READ_ONLY_RE.match(first)) and all(PIPE_FILTER_RE.match(p) for p in rest)
+
+
+def other_tool(p, store):
+    """PreToolUse on a tool Hall Monitor has no judgment for (create_html_artifact, other servers' MCP tools): log it,
+    and never let it write into .bob/ or .hallmonitor/."""
+    tool, inp = P.tool(p), P.tool_input(p)
+    if P.is_own_tool(tool):
+        return 0, "", ""
+    blob = json.dumps(inp, default=str)
+    path = P.first(inp, "path", "file_path", "target_file", "output_path", "file")
+    if (path and is_protected(store.root, path, base=P.first(p, "cwd"))) or names_protected(blob.replace("\\\\", "/")):
+        store.log({"stage": "step", "tool": tool, "target": blob[:200], "action": "block",
+                   "note": "protected: Hall Monitor's own configuration and records"})
+        return 2, "", ("Hall Monitor: .bob/ and .hallmonitor/ hold Hall Monitor's own configuration and records, "
+                       "so no tool may use them during a supervised task. Ask the user if a change there is needed.")
+    store.log({"stage": "step", "tool": tool, "target": blob[:200], "action": "allow",
+               "note": "logged, not judged: Hall Monitor has no rules for this tool"})
+    return 0, "", ""
+
+
+DELETE_RE = re.compile(r"^\s*(rm|del|erase|remove-item|git\s+rm)\b(?P<args>.*)$", re.I)
+
+
+def own_scratch(store):
+    """Files the agent created in this task: edited under Hall Monitor and not tracked by git."""
+    tracked = set(gitutil.tracked_files(store.root))
+    return {r["file"] for r in store.evidence() if r.get("kind") == "edit" and r.get("file")} - tracked
+
+
+def removes_own_scratch(store, files=(), commands=()):
+    """True when the action only deletes files the agent itself created in this task. Real Bob, Sept 28: a helper
+    script the agent wrote to read a PDF couldn't be deleted ("not needed for the goal") or tested (out of scope),
+    so Receipts held the task to a rule about it with no way out. Undoing your own scratch work is always allowed."""
+    scratch = own_scratch(store)
+    targets = set(files)
+    for c in commands:
+        m = DELETE_RE.match(c or "")
+        if not m:
+            return False
+        args = [a.strip("'\"") for a in re.split(r"[\s,]+", m["args"]) if a and not a.startswith("-")]
+        if not args:
+            return False
+        targets |= {rel_path(store.root, a) for a in args}
+    return bool(targets) and targets <= scratch
+
+
 def _read(root, path, limit=3000):
     try:
         return (Path(root) / path).read_text(encoding="utf-8")[:limit]
@@ -90,20 +188,33 @@ def judge(store, action, reason=None, check_match=False, agent="main", agent_tas
     With `failed_step` (a command that just failed), the same request also asks whether the stated
     reason deals with that failure (the outcome check)."""
     cfg, sess = store.config(), store.session()
-    decisions = store.active_decisions(kind="limit")  # obligations are checked by Receipts
+    # Limits, and obligations one edit can break. Real Bob, Sept 28: "Password comparison must remain constant-time"
+    # was scoped an obligation, so an intent to switch to == was approved; only Bob's own judgment stopped it.
+    decisions = store.per_action_decisions()
     others = [{"agent": it["agent"], "task": it.get("agent_task"), "intent": it["intent"],
-               "files": it.get("files", [])} for it in store.active_intents(exclude_agent=agent)][-4:]
+               "files": it.get("files", [])} for it in store.active_intents(exclude_agent=agent)][-6:]
     if deep and action.get("target"):
         action = {**action, "current_file_before_change": _read(store.root, action["target"])}
     state = {
         "goal": sess.get("goal") or "(no goal recorded yet)",
         "agent": {"name": agent, "assigned_task": agent_task} if agent != "main" else None,
         "decisions": {d["id"]: d["text"] for d in decisions},
+        # Context only, never asked about per action. Real Bob, Sept 28: intents to write the tests D4/D5 require
+        # said "to satisfy D4/D5", which Jev, never shown D4/D5, read as rationalizing (0.27 -> 0.54 as Bob
+        # retried) and off-task, so a subagent was blocked from writing its tests three times.
+        "rules_checked_when_the_task_is_done": {d["id"]: d["text"] for d in store.active_decisions(kind="obligation")
+                                                if d["id"] not in {x["id"] for x in decisions}},
         "recent_actions": sess["actions"][-(10 if deep else 5):],
         "other_agents": others,
         "action": action,
         "stated_reason": reason or None,
     }
+    if HALL_PASS_RE.search(json.dumps(action) + (reason or "")):
+        # Real Bob, Sept 28: a subagent briefed to publish the Hall Pass, the protocol's last step, was rejected as
+        # off-task (p=0.98).
+        state["supervisor_protocol"] = ("Every supervised task ends by publishing Hall Monitor's report "
+                                        "(.hallmonitor/hall-pass.html, the Hall Pass) for the user: reading it and "
+                                        "publishing it as a page or artifact are part of the task.")
     ids = [d["id"] for d in decisions]
     # An edit under an approved intent (check_match) was already judged on-task and clash-free when the
     # intent was approved. Asking again only adds noise: in the scripted demo, several small readings
@@ -134,8 +245,13 @@ def judge(store, action, reason=None, check_match=False, agent="main", agent_tas
         pattern = max((k for k in dist if k != "none"), key=dist.get)
     if "matches_intent" in answers:
         risks["mismatch"] = 1 - answers["matches_intent"]["noul"]
-    conflicts = {others[j]["agent"]: answers[f"conflict_{j}"]["noul"] for j in range(len(others))
-                 if f"conflict_{j}" in answers}  # not asked for an edit under an approved intent
+    # Per agent, the worst of its intents: keyed by agent alone, a newer harmless intent hid an older conflicting one
+    # that was still active (audit sweep, Sept 28). Not asked for an edit under an approved intent.
+    conflicts = {}
+    for j in range(len(others)):
+        if f"conflict_{j}" in answers:
+            a = others[j]["agent"]
+            conflicts[a] = max(conflicts.get(a, 0.0), answers[f"conflict_{j}"]["noul"])
     if conflicts:
         risks["conflict"] = max(conflicts.values())
     worlds, reveal = policy.independent(risks, tuple(cfg["uncertain_band"]))
@@ -149,10 +265,21 @@ def judge(store, action, reason=None, check_match=False, agent="main", agent_tas
                             failed_step=failed_step)
         detail2["tokens"] += detail["tokens"]
         detail2["escalated"] = "deep_look"
-        if d2.escalate:
+        if d2.escalate and settled_after_deep_look(d2, check_match, cfg["uncertain_band"][0]):
+            detail2["escalated"] = "deep_look_settled"
+        elif d2.escalate:
             d2.action, detail2["escalated"] = "ask_human", "human"
         return d2, detail2
     return d, detail
+
+
+def settled_after_deep_look(d, check_match, low):
+    """After the deep look, an edit under an approved intent whose only open question is a small mismatch (< 0.5)
+    takes the deep look's best action instead of going to the user. Real Bob, Sept 27-28: edits at mismatch
+    0.23-0.31, every other risk under 0.1, went to the user as "unsure" (untested-change, subagents runs)."""
+    r = d.risks
+    return (check_match and d.action == "allow" and r.get("mismatch", 0) < 0.5
+            and all(p < low for k, p in r.items() if k != "mismatch"))
 
 
 def explain(store, d, detail):
@@ -204,7 +331,16 @@ def declare_intent(store, intent, files=(), commands=(), agent="main", agent_tas
                    "ms": int((time.time() - t0) * 1000)})
         return f"{row['id']} needs the user's decision before you continue:\n{why}\nAsk the user."
 
-    if commands and not files and not sess["failed_step"] and all(re.match(cfg["safe_commands"], c) for c in commands):
+    if any(is_protected(store.root, f) for f in files) or any(touches_protected(c) for c in commands):
+        # Real Bob, Sept 28: Jev approved an intent to edit .bob/mcp.json, and only the edit itself was blocked.
+        why = "- .bob/ and .hallmonitor/ hold Hall Monitor's own configuration and records; only the user changes them"
+        row = store.add_intent({**base, "verdict": "rejected", "why": why})
+        store.log({"stage": "intent", "agent": agent, "target": target, "reason": intent[:300], "action": "block",
+                   "verdict": "rejected", "note": "protected: Hall Monitor's own configuration and records",
+                   "ms": int((time.time() - t0) * 1000)})
+        return f"{row['id']} REJECTED. Do not do this:\n{why}\nAsk the user if a change there is needed."
+
+    if commands and not files and not sess["failed_step"] and all(is_safe_command(cfg, c) for c in commands):
         # Only safe commands (the test command, git status, ...), which PreToolUse allows without Jev anyway.
         # Real Bob, Sept 27: Jev was unsure about "run python -m pytest -q", so Bob stopped to ask the user.
         row = store.add_intent({**base, "verdict": "approved", "why": ""})
@@ -212,8 +348,16 @@ def declare_intent(store, intent, files=(), commands=(), agent="main", agent_tas
                    "verdict": "approved", "note": "safe commands only", "ms": int((time.time() - t0) * 1000)})
         return f"{row['id']} approved. Go ahead: {target}."
 
+    deleting = commands or re.search(r"\b(delete|remove|clean(ing)? up)\b", intent, re.I)
+    if files and deleting and removes_own_scratch(store, files, commands):
+        row = store.add_intent({**base, "verdict": "approved", "why": ""})
+        store.log({"stage": "intent", "agent": agent, "target": target, "reason": intent[:300], "action": "allow",
+                   "verdict": "approved", "note": "removes the agent's own scratch files",
+                   "ms": int((time.time() - t0) * 1000)})
+        return f"{row['id']} approved. Go ahead: {target}."
+
     failed = sess["failed_step"]
-    suspect = [f for f in files if f in sess["suspect_files"]]  # v4 loop L4 -> L1
+    suspect =[f for f in files if f in sess["suspect_files"]]  # v4 loop L4 -> L1
     try:
         action = {"declared_intent": intent, "files": files, "commands": commands}
         if suspect:  # the deep look, with the suspect files as they are now
@@ -277,24 +421,36 @@ def pre_tool(p, store):
     cfg, sess = store.config(), store.session()
     tool = P.tool(p)
     path, command, detail_text = P.describe(tool, P.tool_input(p))
+    raw_command = command  # repo_command drops a leading `cd .bob &&`, which is the part that names the folder
     command = evidence.repo_command(store.root, command)
     rel = rel_path(store.root, path, base=P.first(p, "cwd")) if path else None
 
     if tool in P.SPAWN_TOOLS:
         return spawn_check(p, store)
+    if tool not in P.EDIT_TOOLS and tool not in P.COMMAND_TOOLS:
+        return other_tool(p, store)
     if rel and tool in P.EDIT_TOOLS and is_protected(store.root, rel):  # rel is already resolved against cwd
         store.log({"stage": "step", "tool": tool, "target": rel, "action": "block",
                    "note": "protected: Hall Monitor's own configuration and records"})
         return 2, "", ("Hall Monitor: .bob/ and .hallmonitor/ hold Hall Monitor's own configuration and records, "
                        "so they can't be edited during a supervised task. Ask the user if a change there is needed.")
+    if command and tool in P.COMMAND_TOOLS and (touches_protected(command) or touches_protected(raw_command)):
+        store.log({"stage": "step", "tool": tool, "target": command, "action": "block",
+                   "note": "protected: a command that changes Hall Monitor's own configuration and records"})
+        return 2, "", ("Hall Monitor: this command could change .bob/ or .hallmonitor/, which hold Hall Monitor's own "
+                       "configuration and records. Ask the user if a change there is needed.")
     if rel and tool in P.EDIT_TOOLS and rel.lower() == cfg["claims_file"].lower():
         from . import receipts
         return receipts.check_hook(store, detail_text)
     if rel and tool in P.EDIT_TOOLS and any(fnmatch.fnmatch(rel, g) for g in cfg["plan_globs"]):
         from . import plan
         return plan.check(store, detail_text)
-    if command and re.match(cfg["safe_commands"], command):
+    if command and is_safe_command(cfg, command):
         store.log({"stage": "step", "tool": tool, "target": command, "action": "allow", "note": "safe command"})
+        return 0, "", ""
+    if command and removes_own_scratch(store, commands=[command]):
+        store.log({"stage": "step", "tool": tool, "target": command, "action": "allow",
+                   "note": "removes the agent's own scratch files"})
         return 0, "", ""
 
     intent = store.intent_for(path=rel, command=command)
@@ -336,7 +492,8 @@ def pre_tool(p, store):
         # doesn't match the newest covering intent is checked against the other agents' before it's blocked.
         # An uncertain mismatch too, and the same agent's older intents: real Bob, Sept 27, a test edit at mismatch
         # 0.26 went to the user although an earlier intent of the same agent covered it.
-        if intent and not exact and d.action != "allow" and d.risks.get("mismatch", 0) >= cfg["uncertain_band"][0]:
+        doubtful = d.action != "allow" or det.get("escalated") == "deep_look_settled"
+        if intent and not exact and doubtful and d.risks.get("mismatch", 0) >= cfg["uncertain_band"][0]:
             for other in store.intents_covering(path=rel, command=command, exclude_id=intent["id"])[:3]:
                 d2, det2 = judge(store, action, reason=other["intent"], check_match=True, agent=other["agent"],
                                  agent_task=other.get("agent_task"))
@@ -373,6 +530,32 @@ def pre_tool(p, store):
                    "\nChoose an approach that respects the active decisions, or ask the user to change them.")
 
 
+def _flat(text):
+    return re.sub(r"\s+", " ", re.sub(r"[\"'`“”‘’]", "", text or "")).strip().lower()
+
+
+AUDIT_EXTRA_WORDS = 6  # words a brief may add to the requested audit brief ("please", a heading)
+
+
+def requested_audit(store, brief_text, kind):
+    """The pending Receipts audit brief this spawn carries out, or None. Real Bob, Sept 28: Receipts asked for an
+    explore audit and the spawn check blocked its brief as a rationalization. Only a read-only explore subagent
+    whose brief is that audit brief, near word for word, counts: a brief that quotes the claim and adds steering
+    ("confirm it holds because ...") is judged like any other (audit sweep, Sept 28)."""
+    if kind != "explore":
+        return None
+    words = _flat(brief_text).split()
+    for agent, briefs in (store.session().get("audit_briefs") or {}).items():
+        for requested in briefs:
+            want = _flat(requested).split()
+            if not want or not set(want[:12]) <= set(words):
+                continue
+            extra = [w for w in words if w not in set(want)]
+            if len(extra) <= AUDIT_EXTRA_WORDS and len(set(want) & set(words)) >= 0.9 * len(set(want)):
+                return f"{agent}: {requested.splitlines()[0][:80]}"
+    return None
+
+
 def spawn_check(p, store):
     """PreToolUse on spawn_subagent: the subagent's brief is checked against the goal, the decisions and
     the other agents' work BEFORE it starts. This works whether or not hooks fire inside subagents."""
@@ -383,6 +566,14 @@ def spawn_check(p, store):
     # Bob's `name` is the preset, shared by parallel subagents, so number them to keep their work apart
     name = P.first(inp, "title", default=None) or f"{kind}-subagent-{n}"
     action = {"tool": "spawn_subagent", "subagent_type": kind, "brief": brief_text[:1500]}
+    audit = requested_audit(store, brief_text, kind)
+    if audit:  # Hall Monitor asked for this read-only audit itself, so judging the brief could only get in its way
+        store.add_intent({"agent": name, "agent_task": brief_text[:600], "intent": brief_text[:600], "files": [],
+                          "commands": [], "verdict": "approved", "why": "", "source": "spawn", "subagent_type": kind})
+        store.log({"stage": "spawn", "agent": name, "target": f"{kind}: {brief_text[:120]}", "action": "allow",
+                   "verdict": "approved", "note": f"audit Hall Monitor requested for claim {audit}",
+                   "ms": int((time.time() - t0) * 1000)})
+        return 0, "", ""
     try:
         d, det = judge(store, action, reason=brief_text, agent=name, agent_task=brief_text)
     except jev.JevRefused:

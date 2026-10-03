@@ -18,7 +18,7 @@ def check(store, text):
     headings = " ".join(re.findall(r"^#+\s*(.+)$", text, re.M)).lower()
     missing = [k for k, pat in SECTIONS.items() if not re.search(pat, headings)]
     steps = steps_of(text)
-    decisions = store.active_decisions(kind="limit")
+    decisions = store.per_action_decisions()
     viol, tok = {}, 0
     if steps and decisions:
         qs = {f"s{i}_{d['id']}": Q.plan_step_violates(i, d["id"]) for i in range(len(steps)) for d in decisions}

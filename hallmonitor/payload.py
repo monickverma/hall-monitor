@@ -5,9 +5,18 @@ shape ({hook_event_name, tool_name, tool_input, ...}); accept either.
 """
 import json
 
-EDIT_TOOLS = {"write_file", "write_to_file", "apply_diff", "search_and_replace", "insert_content"}
+EDIT_TOOLS = {"write_file", "write_to_file", "apply_diff", "search_and_replace", "insert_content", "office_edit"}
 COMMAND_TOOLS = {"execute_command", "run_command", "shell"}
-SPAWN_TOOLS = {"spawn_subagent"}
+SPAWN_TOOLS = {"spawn_subagent", "start_subtask", "new_task"}
+# Tools Hall Monitor only logs (and keeps out of .bob/ and .hallmonitor/): everything else Bob can call, including
+# other servers' MCP tools. Hall Monitor's own MCP tools are never judged.
+LOG_ONLY_TOOLS = {"create_html_artifact", "use_mcp_tool", "access_mcp_resource"}
+OWN_TOOLS = {"declare_intent", "explain_block", "record_decision", "list_decisions", "list_evidence",
+             "submit_claims", "hall_pass"}
+
+
+def is_own_tool(name):
+    return str(name).split("__")[-1] in OWN_TOOLS
 
 
 def first(d, *keys, default=None):
@@ -53,7 +62,7 @@ def prompt(p):
 
 def describe(tool_name, inp):
     """Return (path, command, detail) for a tool call."""
-    path = first(inp, "path", "file_path", "target_file")
+    path = first(inp, "path", "file_path", "target_file", "output_path", "file")
     command = first(inp, "command", "cmd")
     if tool_name in ("search_and_replace",):
         detail = f"replace:\n{first(inp, 'search', default='')}\nwith:\n{first(inp, 'replace', default='')}"

@@ -16,6 +16,25 @@ QHASH = hashlib.sha1(b"".join(Path(__file__).with_name(f).read_bytes()
 
 # The agent must never edit its own supervisor. Checked in code, before Jev is asked.
 PROTECTED = (".bob", ".hallmonitor")
+# For ledger rows recorded before Jev was asked `breaks_in_one_step`: rules one edit can break, where something
+# must stay as it is or an action is forbidden. Jev has scoped both as obligations (real Bob, Sept 27 and 28).
+INVARIANT_RE = re.compile(r"\b(must|should|shall)\s+(always\s+)?(remain|stay|be kept)\b|\bmust never\b|"
+                          r"\b(do not|don['’]t|never|must not|shall not|should not|may not)\s+(use|add|modify|change|"
+                          r"edit|remove|delete|call|store|log|import|introduce|commit|disable|bypass|weaken|skip)\b",
+                          re.I)
+# ... but not a rule met by later work ("Do not change behavior without a test") or a state the task passes through.
+LATER_WORK_RE = re.compile(r"\b(without|unless|until|before|first)\b|\b(stay|remain)\s+(green|passing|above|below)\b|"
+                           r"\bup to date\b", re.I)
+
+
+def per_action(row):
+    """Checked on every action: a limit, or an obligation one edit can break (which Receipts still checks too)."""
+    if row.get("kind", "limit") == "limit":
+        return True
+    if row.get("per_action") is not None:  # Jev's answer, asked when the rule was recorded
+        return bool(row["per_action"])
+    text = row.get("text") or ""
+    return bool(INVARIANT_RE.search(text)) and not LATER_WORK_RE.search(text)
 
 
 def is_protected(root, path, base=None):
@@ -233,13 +252,24 @@ class Store:
         return self._jsonl("ledger.jsonl")
 
     def active_decisions(self, kind=None):
+        """Rules in force. A rule from a user's prompt lasts for the session it was said in. Real Bob, Sept 27: the
+        docs task's "Change only README.md." stayed a user rule and would have blocked every later task."""
         rows = self.ledger()
         dead = {r["supersedes"] for r in rows if r.get("supersedes")}
-        return [r for r in rows if r["id"] not in dead and (kind is None or r.get("kind") == kind)]
+        current = self.session().get("session_id")
+        return [r for r in rows if r["id"] not in dead and (kind is None or r.get("kind") == kind)
+                and not (current and r.get("session") and r["session"] != current)]
 
-    def add_decision(self, text, source, kind="limit", supersedes=None):
+    def per_action_decisions(self):
+        return [d for d in self.active_decisions() if per_action(d)]
+
+    def add_decision(self, text, source, kind="limit", supersedes=None, per_action=None, session=None):
         row = {"id": f"D{len(self.ledger()) + 1}", "text": text, "source": source, "kind": kind,
                "recorded_at": now(), "supersedes": supersedes}
+        if per_action is not None:
+            row["per_action"] = per_action
+        if session:
+            row["session"] = session
         self._append("ledger.jsonl", row)
         return row
 

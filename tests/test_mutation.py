@@ -161,15 +161,17 @@ def test_sabotage_runs_in_a_copy_and_leaves_the_working_tree_alone(repo, monkeyp
     assert [(m["file"], m["line"]) for m in sab["survived"]] == [("app/limits.py", n) for n in (10, 11, 12)]  # label()
 
 
-def test_sabotage_falls_back_to_the_working_tree_when_the_copy_cannot_pass(repo):
+def test_sabotage_never_mutates_the_working_tree_even_when_the_copy_cannot_pass(repo):
+    """Audit sweep, Sept 28: the in-place fallback lost a parallel subagent's edit to the restore, and a tree
+    failing for another reason scored every mutant killed. Now no copy, no sabotage evidence."""
     (repo.root / ".gitignore").write_text("local_settings.py\n__pycache__/\n.pytest_cache/\n")
     (repo.root / "local_settings.py").write_text("DEBUG = True\n")  # ignored by git, so not in the copy
     (repo.root / "tests" / "test_settings.py").write_text("import local_settings\n\n\ndef test_it():\n    pass\n")
     changes = gitutil.changes(repo.root, repo.session()["base"])
     before = tree_hash(repo.root)
     sab = gitutil.sabotage(repo.root, changes, "python -m pytest -q", max_mutants=4)
-    assert sab["mutants"] == 4 and [m["line"] for m in sab["survived"]] == [10, 11, 12]
-    assert tree_hash(repo.root) == before  # restored after each in-place mutant, as before v4.2
+    assert (sab["mutants"], sab["killed"], sab["survived"]) == (0, 0, []) and sab["skipped"]
+    assert tree_hash(repo.root) == before
 
 
 def test_sabotage_leaves_the_prose_of_a_docstring_alone(tmp_path):

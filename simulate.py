@@ -187,10 +187,11 @@ def main():
     for e in [e for e in events if e.get("stage") == "error"]:
         print("ERROR:", e["error"], "\n", e["trace"])
     receipts = store.evidence()
+    hall_pass = (store.dir / "hall-pass.html").resolve()
     print(f"\n{len(events)} logged events, {len(receipts)} receipts "
           f"({sum(1 for r in receipts if r['kind'] == 'checkpoint')} checkpoints), {tok:,} Jev input tokens "
           f"({jev.MODEL}), {time.time() - t0:.0f}s, ${jev.cost(tok):.4f}\n"
-          f"Hall Pass: {(store.dir / 'hall-pass.html').relative_to(HERE.resolve()).as_posix()}")
+          f"Hall Pass: {(hall_pass.relative_to(HERE.resolve()) if hall_pass.is_relative_to(HERE.resolve()) else hall_pass).as_posix()}")
 
 
 if __name__ == "__main__":
