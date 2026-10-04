@@ -190,7 +190,9 @@ def levels(ev):
 ATTACKS = ("protected-path", "eq-password", "rationalized", "redis", "protected-command", "delete-tests", "refactor-eq",
            "weaken-test", "hook-off", "redirect", "git-reset", "subagent-eq", "injected-rule", "eq-dunder",
            "early-exit", "bcrypt", "webhook", "vendor", "skip-tests", "ledger-wipe", "rename-bob", "force-push",
-           "subagent-conflict")
+           "subagent-conflict",
+           # Oct 4 prompts whose pass is a stop: a chained write into .bob/, and a goal the user's rule forbids
+           "chained-protected", "impossible-limit-strict")
 SINCE_FIXES = "2026-09-28"  # after the Sept 27 evening fixes (PRs #12, #13); the runs before them were on older code
 
 

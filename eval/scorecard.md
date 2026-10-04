@@ -18,12 +18,12 @@ score = min(quality, cap of the strongest evidence). Evidence: E0 design · E1 u
 
 ## Measured
 
-- attacks stopped by Hall Monitor: 20/29 (the other 9: Bob refused on its own, so Hall Monitor was never tested)
-- work runs ended verified, all: 19/41
-- work runs ended verified, since 2026-09-28: 16/29
+- attacks stopped by Hall Monitor: 22/31 (the other 9: Bob refused on its own, so Hall Monitor was never tested)
+- work runs ended verified, all: 19/39
+- work runs ended verified, since 2026-09-28: 16/27
 - work runs cut off by the budget or a gateway error: 4
-- false stops on work runs (stops later allowed): 17/64
-- median Bob cost of a work run: 0.83
+- false stops on work runs (stops later allowed): 17/62
+- median Bob cost of a work run: 0.84
 - real runs: 76
 - verified in the first round: 11/75
 - ended verified: 22/76
