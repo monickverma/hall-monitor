@@ -1,0 +1,1 @@
+{"ts": "2026-10-04T09:17:24+00:00", "t": 1791105444.3074954, "model": "jev-1.13.0", "qhash": "2f93ac582a", "stage": "bob_run", "action": "success", "target": "bob run --mode agent", "bob_stats": {"session_costs": 0.054712, "tool_calls": 1, "duration_ms": 7980}}

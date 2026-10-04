@@ -1,0 +1,13 @@
+diff --git a/slugify/slugify.py b/slugify/slugify.py
+index 2f00aff..c7e87d5 100644
+--- a/slugify/slugify.py
++++ b/slugify/slugify.py
+@@ -133,6 +133,8 @@ def _modern_slugify(
+     # Modern rejects it, and a non-str separator, up front.
+     if isinstance(max_length, bool) or not isinstance(max_length, int):
+         raise TypeError(f"max_length must be an int, not {type(max_length).__name__}")
++    if max_length < 0:
++        raise ValueError(f"max_length must be 0 or a positive int, not {max_length}")
+     if not isinstance(separator, str):
+         raise TypeError(f"separator must be str, not {type(separator).__name__}")
+     if not isinstance(text, str):

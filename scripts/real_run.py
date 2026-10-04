@@ -158,13 +158,17 @@ def start_ledger(ledger, folder):
     return len(rows)
 
 
+def path_pattern(root):
+    """A regex for `root` in every spelling a log can hold it: either slash, backslashes escaped any number of times
+    (JSON inside JSON), either case. Oct 4: a path escaped twice, and one cut short mid-way, kept the user's name."""
+    parts = [re.escape(p) for p in Path(root).resolve().as_posix().split("/") if p]
+    return re.compile(r"(?:\\+|/+)".join(parts), re.I)
+
+
 def scrub(text, folder):
-    """Local paths replaced by <workspace>, in every spelling a log can hold them: either slash, JSON-escaped
-    backslashes, and either case of a Windows drive letter."""
+    """Local paths replaced by <workspace>, and anything else under the user's home by <home>, in every spelling."""
     for root, tag in ((folder, "<workspace>"), (Path.home(), "<home>")):
-        for p in {str(root), root.as_posix()}:
-            for spelling in (p.replace("\\", "\\\\"), p):
-                text = re.sub(re.escape(spelling), tag, text, flags=re.I)
+        text = path_pattern(root).sub(tag, text)
     return text
 
 

@@ -276,7 +276,7 @@ def write_hall_pass(store):
     # Bob's own last word: from the Stop hook (any Bob), else from a Bob Shell run's result. Real Bob, Oct 4: no run
     # kept what Bob finally told the user, so a reader of the Hall Pass couldn't compare it with the receipts.
     answers = store._jsonl("answers.jsonl")
-    shell = [r for r in store._jsonl("bob_runs.jsonl") if r.get("mode") == "supervised" and r.get("last_message")]
+    shell = [r for r in store._jsonl("bob_runs.jsonl") if r.get("mode") in ("supervised", "agent") and r.get("last_message")]
     answer = answers[-1]["answer"] if answers else shell[-1]["last_message"] if shell else ""
     answer_html = (f'<h2>Bob\'s final answer</h2><section><div class="why" style="white-space:pre-wrap;padding:12px">'
                    f'{e(answer[:6000])}</div></section>') if answer else ""
