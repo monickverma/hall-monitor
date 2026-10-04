@@ -52,7 +52,7 @@ git checkout -- eval/review/
 
 It works if:
 - every test passes;
-- the control set scores 20/20;
+- the control set scores 24/24;
 - `simulate.py` ends VERIFIED with 9 stops, and the `grep` prints 0. Hall Monitor fails open, so without this check an internal error would pass silently;
 - the seeded eval catches 21 of 22 false claims, with 2 of 38 false alarms, on claims we seeded ourselves.
 

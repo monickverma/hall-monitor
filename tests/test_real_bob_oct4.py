@@ -206,3 +206,130 @@ def test_a_regex_in_inline_code_is_not_a_protected_folder_but_a_bare_wildcard_st
     for c in ("git show c97587c:app/auth.py | cat", "Write-Output \"creating artifact placeholder\"", "echo done"):
         assert step.is_safe_command(cfg, c), c
     assert not step.is_safe_command(cfg, "echo hi > app/auth.py")
+
+
+def test_parallel_hook_processes_lose_no_event_and_share_no_receipt_id(tmp_path):
+    """Real Bob IDE, Oct 4: two parallel tool calls tore two lines of events.jsonl and the Stop hook then crashed."""
+    import json as _json
+    import subprocess
+    import sys
+    from pathlib import Path
+    from conftest import make_repo
+    store = make_repo(tmp_path, {"app/__init__.py": ""})
+    hook = Path(__file__).resolve().parents[1] / "hm_hook.py"
+    n = 12
+    procs = []
+    for i in range(n):
+        payload = {"hook_event_name": "PostToolUse", "tool_name": "execute_command", "cwd": str(store.root),
+                   "tool_input": {"command": f"git log -{i + 1}"}, "tool_use_id": f"t{i}", "tool_response": "ok"}
+        p = subprocess.Popen([sys.executable, str(hook)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, env={**__import__("os").environ, "TYPESAFE_API_KEY": ""})
+        procs.append((p, _json.dumps(payload)))
+    for p, data in procs:  # write every payload first, so the processes overlap
+        p.stdin.write(data)
+        p.stdin.close()
+    for p, _ in procs:
+        p.wait(timeout=120)
+    lines = (store.dir / "evidence.jsonl").read_text(encoding="utf-8").splitlines()
+    rows = [_json.loads(l) for l in lines]  # every line is whole
+    assert len(rows) == n and len({r["id"] for r in rows}) == n
+    for l in (store.dir / "events.jsonl").read_text(encoding="utf-8").splitlines() if (store.dir / "events.jsonl").exists() else []:
+        _json.loads(l)
+
+
+# ---------------------------------------------------------------- capture: Bob's answer and the whole run
+
+def test_a_stream_json_run_keeps_bobs_answer_and_its_whole_transcript(tmp_path):
+    """Real Bob Shell 2.0.5 stream-json output (tests/data_bob_stream_sample.jsonl). Until Oct 4 no run kept Bob's
+    final answer: _record kept only status and stats."""
+    import json as _json
+    from pathlib import Path
+    from conftest import make_repo
+    from hallmonitor import bob
+    out = (Path(__file__).parent / "data_bob_stream_sample.jsonl").read_text(encoding="utf-8")
+    data = bob._parse_stream(out)
+    assert data["status"] == "success" and data["last_message"] == "done"
+    assert [e["type"] for e in data["transcript"]] == ["message", "tool_use", "tool_result", "message", "result"]
+    store = make_repo(tmp_path, {"app/__init__.py": ""})
+    bob._record(store.root, "supervised", "List the files, then say done", data)
+    row = store._jsonl("bob_runs.jsonl")[-1]
+    assert row["last_message"] == "done" and row["stats"]["task_id"]
+    kept = [_json.loads(l) for l in (store.dir / "bob_transcript.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert len(kept) == 5 and kept[1]["tool_name"] == "list_files" and kept[0]["task_id"] == row["stats"]["task_id"]
+    # --format json output (one object) is still read
+    assert bob._parse_stream('{"type": "result", "status": "success", "last_message": "hi", "stats": {}}') is None
+
+
+def test_the_stop_hook_keeps_bobs_final_answer_and_the_hall_pass_shows_it(tmp_path, monkeypatch):
+    from conftest import FakeJev, make_repo
+    from hallmonitor import hook, jev
+    monkeypatch.setattr(jev, "ask", FakeJev())
+    store = make_repo(tmp_path, {"app/__init__.py": ""})
+    answer = "Done: the docstring is in app/service.py, and all 3 tests pass."
+    hook.handle({"hook_event_name": "Stop", "cwd": str(store.root), "last_assistant_message": answer})
+    assert store._jsonl("answers.jsonl")[-1]["answer"] == answer
+    from hallmonitor import report
+    report.write_hall_pass(store)
+    page = (store.dir / "hall-pass.html").read_text(encoding="utf-8")
+    assert "Bob&#x27;s final answer" in page or "Bob's final answer" in page
+    assert "the docstring is in app/service.py" in page
+
+
+def test_review_page_answers_import_into_the_review_sheets(tmp_path):
+    """eval/import_review.py on a copy of the sheets: finished parts fill accept_rN and minutes; unfinished ones don't."""
+    import csv as _csv
+    import importlib.util
+    import shutil
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    shutil.copytree(root / "eval" / "review", tmp_path / "eval" / "review")
+    shutil.copy(root / "eval" / "review_queue_sample.csv", tmp_path / "eval" / "review_queue_sample.csv")
+    spec = importlib.util.spec_from_file_location("imp", root / "eval" / "import_review.py")
+    imp = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(imp)
+    ids = [r["id"] for r in _csv.DictReader(open(root / "eval" / "review" / "form_A_1_without.csv", encoding="utf-8"))]
+    key = next(_csv.DictReader(open(root / "eval" / "review_queue_sample.csv", encoding="utf-8")))["key"]
+    doc = {"slot": "r1", "form": "A", "queue": {key: "y"},
+           "parts": {"1_without": {"started": 0, "finished": 300000, "answers": {i: "n" for i in ids}},
+                     "2_with": {"started": 400000, "finished": None, "answers": {}}}}
+    n = imp.import_answers([doc], root=tmp_path)
+    assert n == {"answers": len(ids), "minutes": 1, "labels": 1}
+    rows = list(_csv.DictReader(open(tmp_path / "eval" / "review" / "form_A_1_without.csv", encoding="utf-8")))
+    assert {r["accept_r1"] for r in rows} == {"n"} and {r["accept_r2"] for r in rows} == {""}
+    mins = {(r["reviewer"], r["part"]): r["minutes"] for r in _csv.DictReader(open(tmp_path / "eval" / "review" / "minutes.csv", encoding="utf-8"))}
+    assert mins[("r1", "1_without")] == "5.0" and mins[("r1", "2_with")] == ""
+    import pytest
+    with pytest.raises(SystemExit):
+        imp.import_answers([doc, dict(doc)], root=tmp_path)  # two people in one slot
+
+
+def test_streamed_message_pieces_are_joined_into_bobs_answer():
+    import json as _json
+    from hallmonitor import bob
+    pieces = ["I", "'ll read both files.", "Done: the docstring is in ", "app/service.py and 3 tests pass. All flag", "ged"]
+    lines = [{"type": "message", "role": "user", "content": "Add a docstring."},
+             {"type": "message", "role": "assistant", "content": pieces[0]},
+             {"type": "message", "role": "assistant", "content": pieces[1]},
+             {"type": "tool_use", "tool_name": "read_file", "tool_id": "t1", "parameters": {"path": "app/service.py"}},
+             {"type": "tool_result", "tool_id": "t1", "status": "success", "output": "..."}]
+    lines += [{"type": "message", "role": "assistant", "content": p} for p in pieces[2:]]
+    lines.append({"type": "result", "status": "success", "stats": {"task_id": "x"}})
+    data = bob._parse_stream("\n".join(_json.dumps(l) for l in lines))
+    assert data["last_message"] == "Done: the docstring is in app/service.py and 3 tests pass. All flagged"
+    assert [e["type"] for e in data["transcript"]] == ["message", "message", "tool_use", "tool_result", "message", "result"]
+    assert data["transcript"][1]["content"] == "I'll read both files."
+
+
+def test_a_hook_payload_is_read_as_utf8(tmp_path):
+    import subprocess
+    import sys
+    from pathlib import Path
+    from conftest import make_repo
+    store = make_repo(tmp_path, {"app/__init__.py": ""})
+    answer = "The Hall Pass shows VERIFIED — RECEIPTS ✅"
+    payload = '{"hook_event_name": "Stop", "cwd": "%s", "last_assistant_message": "%s"}' % (
+        str(store.root).replace("\\", "\\\\"), answer)
+    hook = Path(__file__).resolve().parents[1] / "hm_hook.py"
+    subprocess.run([sys.executable, str(hook)], input=payload.encode("utf-8"), capture_output=True, timeout=120,
+                   env={**__import__("os").environ, "TYPESAFE_API_KEY": ""})
+    assert store._jsonl("answers.jsonl")[-1]["answer"] == answer

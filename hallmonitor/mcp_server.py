@@ -87,7 +87,10 @@ def call(name, args, store):
     answers that Hall Monitor couldn't check it, instead of failing."""
     prefix = pending(store, name)
     try:
-        return prefix + _call(name, args, store)
+        if name in ("submit_claims", "hall_pass"):  # long (tests, sabotage, audits): only its writes are locked
+            return prefix + _call(name, args, store)
+        with store.locked(timeout=50):  # one at a time with the hooks (store.Store.locked)
+            return prefix + _call(name, args, store)
     except jev.JevRefused:
         store.log({"stage": "error", "tool": name, "fallback": "jev_refused", "error": "Jev refused the request"})
         return prefix + f"Hall Monitor couldn't check this ({name}). Ask the user how to proceed."

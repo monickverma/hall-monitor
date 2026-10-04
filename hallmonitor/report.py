@@ -273,6 +273,13 @@ def write_hall_pass(store):
         seeded_html = ('<h2>Receipts checked against seeded errors</h2><section><table>' +
                        "".join(f'<tr><td class="why">{e(l)}</td></tr>' for l in lines) +
                        f'<tr><td class="stage">{e(note)}</td></tr></table></section>')
+    # Bob's own last word: from the Stop hook (any Bob), else from a Bob Shell run's result. Real Bob, Oct 4: no run
+    # kept what Bob finally told the user, so a reader of the Hall Pass couldn't compare it with the receipts.
+    answers = store._jsonl("answers.jsonl")
+    shell = [r for r in store._jsonl("bob_runs.jsonl") if r.get("mode") == "supervised" and r.get("last_message")]
+    answer = answers[-1]["answer"] if answers else shell[-1]["last_message"] if shell else ""
+    answer_html = (f'<h2>Bob\'s final answer</h2><section><div class="why" style="white-space:pre-wrap;padding:12px">'
+                   f'{e(answer[:6000])}</div></section>') if answer else ""
     page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Hall Pass</title><style>{CSS}</style></head>
 <body><main>
@@ -289,6 +296,7 @@ def write_hall_pass(store):
 <h2>Timeline</h2><section><table>{''.join(rows)}</table></section>
 <h2>Decision ledger</h2><section><table>{''.join(ledger_rows) or '<tr><td>none</td></tr>'}</table></section>
 <h2>Receipts</h2><section><table>{rec or '<tr><td>No claims submitted yet</td></tr>'}</table></section>
+{answer_html}
 {panels.extra(store, receipts)}
 {stuck_html}
 <h2>Loops</h2><div class="feats">{loops_html}</div>
@@ -297,7 +305,7 @@ def write_hall_pass(store):
 <h2>IBM Bob features in play</h2><div class="feats">{''.join(f'<span class="feat">{e(f)}</span>' for f in feats)}</div>
 </main></body></html>"""
     path = store.dir / "hall-pass.html"
-    path.write_text(page, encoding="utf-8")
+    store._replace("hall-pass.html", page)
     summary = (f"{len(judged)} actions/intents judged, {len(stopped)} stopped, {len(patterns)} rationalizations "
                f"named, receipts: {stamp[1]}, Jev cost ${jev.cost(tok):.4f}")
     return str(path), summary

@@ -125,9 +125,26 @@ def real_run(hm):
             "minutes": (stats.get("duration_ms") or 0) / 60000}
 
 
+def ide_export(path, d):
+    """A task exported from the Bob IDE ({version, exportedAt, workspace, tasks: [{task, messages}]}): cost and time from
+    the task, and the outcome from Hall Monitor's last Receipts reply in the transcript."""
+    t = d["tasks"][0]
+    task, final = t.get("task") or {}, "none"
+    for m in t.get("messages") or []:
+        text = str((m.get("data") or {}).get("content") or "")
+        if m.get("role") == "tool" and text.startswith("Receipts"):
+            final = "stuck" if "STUCK" in text[:40] else "send_back" if "not backed" in text[:80] else "accept"
+    minutes = (int(task.get("updatedAt") or 0) - int(task.get("createdAt") or 0)) / 60000
+    return {"name": path.stem, "final": final, "first": "unknown", "send_backs": None, "judged": None, "stops": None,
+            "excuses": None, "stops_later_allowed": None, "stalls": None, "subagents": None, "doc_rules": 0,
+            "jev_usd": None, "bob_usd": (task.get("costs") or {}).get("cost"), "minutes": max(minutes, 0)}
+
+
 def session_file(path):
     """A bob_sessions/*.json record, with its Hall Pass's stamp as the final state."""
     d = load_json(path) or {}
+    if isinstance(d, dict) and d.get("tasks"):
+        return ide_export(path, d)
     stats = d.get("stats") or {}
     page = path.with_name(path.stem + "_hall-pass.html")
     stamp = re.search(r'class="stamp[^"]*"[^>]*>([A-Z ]+)', page.read_text(encoding="utf-8")) if page.exists() else None
@@ -305,7 +322,7 @@ V4_TASKS = {
     "T5 calibration, control set, bulk classification": [
         ("(a) seeded variants with known truth", "eval/seeded.py", "VARIANTS", "seeded", None),
         ("(b) caught, false alarms, agreement, Brier", "eval/score.py", "brier", "score", None),
-        ("(c) control set of 10 must-block and 10 must-allow", "eval/control_set.py", "MUST_BLOCK", "control_set",
+        ("(c) control set of 12 must-block and 12 must-allow", "eval/control_set.py", "MUST_BLOCK", "control_set",
          None),
         ("(d) review sheets for people, with and without Hall Monitor", "eval/review_packet.py", "form_", "review",
          None),
@@ -324,7 +341,7 @@ V4_TASKS = {
 # The evidence each mechanism should reach: E4 (seen in real Bob) for everything that runs inside Bob; the offline
 # evals are measured by design (E3); the review sheets need people's answers (E5).
 TARGET = {"(a) seeded variants with known truth": "E3", "(b) caught, false alarms, agreement, Brier": "E3",
-          "(c) control set of 10 must-block and 10 must-allow": "E3",
+          "(c) control set of 12 must-block and 12 must-allow": "E3",
           "(d) review sheets for people, with and without Hall Monitor": "E5"}
 ORDER = ["missing", "E0", "E1", "E3", "E4", "E5"]
 
@@ -336,7 +353,7 @@ def at_target(label, level):
 # eval mechanisms: the file their measured result lives in ("people": filled in by reviewers)
 MEASURED = {"(a) seeded variants with known truth": "eval/results.json",
             "(b) caught, false alarms, agreement, Brier": "eval/summary.json",
-            "(c) control set of 10 must-block and 10 must-allow": "eval/control_set.json",
+            "(c) control set of 12 must-block and 12 must-allow": "eval/control_set.json",
             "(d) review sheets for people, with and without Hall Monitor": "people",
             "(e) bulk classification into a review queue": "eval/review_queue_summary.json"}
 

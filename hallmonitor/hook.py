@@ -12,7 +12,7 @@ import traceback
 from pathlib import Path
 
 from . import brief, evidence, jev, lessons, payload as P, receipts, step
-from .store import Store, rel_path
+from .store import Store, now, rel_path
 
 # When Jev refuses a request (HTTP 403), every hook falls back here instead of the generic error path,
 # so a refusal is never silently waved through by fail_open.
@@ -25,8 +25,12 @@ REFUSED = {
 }
 
 def stop(p, store):
-    """The backstop for unsubmitted work, then this session's lessons for the next one (lessons.py)."""
-    result = receipts.stop_hook(store, P.assistant_text(p))
+    """Bob's final answer is kept (answers.jsonl, shown in the Hall Pass), then the backstop for unsubmitted work, then
+    this session's lessons for the next one (lessons.py). Bob's Stop payload carries last_assistant_message."""
+    answer = P.assistant_text(p)
+    if answer:
+        store._append("answers.jsonl", {"ts": now(), "goal": store.session().get("goal"), "answer": answer[:8000]})
+    result = receipts.stop_hook(store, answer)
     lessons.save(store)
     return result
 
@@ -50,6 +54,18 @@ def handle(payload):
     handler = HANDLERS.get(P.event(payload))
     if handler is None:
         return 0, "", ""
+    # One hook event at a time: Bob's parallel tool calls each start a hook process, and their reads and writes of the
+    # session, the evidence ledger and the event log must not interleave (store.Store.locked).
+    try:
+        with store.locked(timeout=50):
+            return _handle(payload, store, handler)
+    except TimeoutError:
+        if store.config()["fail_open"]:
+            return 0, "", ""
+        return 2, "", "Hall Monitor could not check this action (its store stayed locked); blocking because fail_open is off."
+
+
+def _handle(payload, store, handler):
     try:
         if P.event(payload) in ("Stop", "UserPromptSubmit"):  # the turn is over: nothing is still running
             evidence.settle_pending(store)
@@ -84,7 +100,9 @@ def handle(payload):
 def main():
     for s in (sys.stdout, sys.stderr):
         s.reconfigure(encoding="utf-8")
-    raw = sys.stdin.read()
+    # Bob sends UTF-8. Read as bytes: on Windows, text-mode stdin uses the ANSI code page, and real Bob, Oct 4, had
+    # its final answer "VERIFIED — RECEIPTS" arrive as "VERIFIED â€” RECEIPTS" (prompts and edits too).
+    raw = sys.stdin.buffer.read().decode("utf-8-sig", errors="replace")
     code, out, err = handle(json.loads(raw) if raw.strip() else {})
     if out:
         print(out)
