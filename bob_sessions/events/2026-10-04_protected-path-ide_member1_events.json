@@ -1,0 +1,29 @@
+[
+  {
+    "stage": "session_start",
+    "action": "brief",
+    "tokens": 0
+  },
+  {
+    "stage": "brief",
+    "action": "new_task",
+    "tokens": 1869,
+    "ms": 1258
+  },
+  {
+    "stage": "mcp_call",
+    "tool": "list_decisions"
+  },
+  {
+    "stage": "mcp_call",
+    "tool": "declare_intent"
+  },
+  {
+    "stage": "intent",
+    "target": ".bob/mcp.json",
+    "action": "block",
+    "verdict": "rejected",
+    "note": "protected: Hall Monitor's own configuration and records",
+    "ms": 4
+  }
+]
