@@ -1,7 +1,9 @@
 """Bob Shell integration (`bob run`, non-interactive).
 
-`bob run --format json` returns one object with `status`, `last_message` and `stats` (task_id, token
-counts, duration_ms, session_costs, tool_calls). Under `bob run` every tool is pre-approved, so no
+`bob run --format stream-json` prints every message, tool call and tool result, one JSON event per line, then a
+`result` with `status` and `stats` (task_id, duration_ms, session_costs, tool_calls). Each run's transcript goes to
+.hallmonitor/bob_transcript.jsonl and Bob's last message to bob_runs.jsonl (`--format json`, one object with
+`last_message`, is still read). Under `bob run` every tool is pre-approved, so no
 human approves anything: Hall Monitor's hooks and the no-edit auditor mode are the only gate.
 Bob Shell reads its key from BOB_API_KEY. HM_BOB_ACCEPT_LICENSE=1 and HM_BOB_TEAM_ID=<id> are opt-ins for a
 fresh machine; a failure before the task runs comes back as status "unparsed" with Bob's `error`.
@@ -21,7 +23,9 @@ def _run(root, mode, prompt, max_cost, max_turns, timeout):
         return None
     # The resolved path, not "bob": on Windows Bob Shell is npm's bob.cmd, and CreateProcess won't find a .cmd
     # from a bare name, so every local `bob run` failed as "bob not on PATH" (Sept 27).
-    cmd = [exe, "run", "--mode", mode, "--format", "json", "--max-cost", str(max_cost),
+    # stream-json: every message, tool call and tool result, one per line, so the run's whole transcript is kept.
+    # Real Bob, Oct 4: with --format json only status and stats were kept, and no run's final answer survived.
+    cmd = [exe, "run", "--mode", mode, "--format", "stream-json", "--max-cost", str(max_cost),
            "--max-turns", str(max_turns), "--workspace", str(root)]
     # On a fresh machine (a CI runner) `bob run` stops at IBM's license, and a "general" API key needs a
     # team id. Both are the operator's to give: Hall Monitor never accepts the license on its own.
@@ -38,15 +42,66 @@ def _run(root, mode, prompt, max_cost, max_turns, timeout):
         return None
     except subprocess.TimeoutExpired:  # Bob Shell's own --max-cost/--max-turns still bound what it spends
         return {"status": "timeout", "stats": {}, "error": f"no result within {timeout}s"}
-    try:
-        data = json.loads(r.stdout)
-    except json.JSONDecodeError:
-        data = _last_result(r.stdout)
+    data = _parse_stream(r.stdout)
+    if data is None:
+        try:
+            data = json.loads(r.stdout)
+        except json.JSONDecodeError:
+            data = _last_result(r.stdout)
     if data is None:
         return {"status": "unparsed", "last_message": r.stdout[-3000:], "stats": {}, "exit_code": r.returncode,
                 "error": (r.stderr or "").strip()[-1000:]}
     data["exit_code"] = r.returncode
     return data
+
+
+def _text(content):
+    if isinstance(content, list):
+        return "\n".join(_text(c) for c in content)
+    if isinstance(content, dict):
+        return str(content.get("text") or content.get("content") or "")
+    return str(content or "")
+
+
+def _parse_stream(stdout):
+    """`--format stream-json`: one event per line (message, tool_use, tool_result, error, and a final result). Returns
+    the result, with Bob's last message and the whole transcript, or None when there is no stream."""
+    events = []
+    for line in (stdout or "").splitlines():
+        try:
+            o = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(o, dict) and o.get("type"):
+            events.append(o)
+    results = [e for e in events if e.get("type") == "result"]
+    if not results or len(events) < 2:  # a lone result object is --format json output
+        return None
+    # Bob streams each message in pieces ("I", "'ll start by reading both", ...): join each run of pieces from one
+    # role into one message. Real Bob, Oct 4: the last piece alone, "ged", was kept as Bob's answer.
+    merged = []
+    for e in events:
+        if e.get("type") == "message" and merged and merged[-1].get("type") == "message" \
+                and merged[-1].get("role") == e.get("role"):
+            merged[-1] = {**merged[-1], "content": _text(merged[-1].get("content")) + _text(e.get("content"))}
+        else:
+            merged.append(dict(e))
+    events = merged
+    said = [e for e in events if e.get("type") == "message" and e.get("role") == "assistant" and _text(e.get("content"))]
+    notes = [str(e.get("message")) for e in events if e.get("type") == "error"]
+    out = {**results[-1], "transcript": events}
+    if said and not out.get("last_message"):
+        out["last_message"] = _text(said[-1]["content"])
+    if notes:
+        out["error"] = " | ".join(notes)
+    return out
+
+
+def _hide_keys(text):
+    for name in ("BOB_API_KEY", "TYPESAFE_API_KEY"):
+        if len(os.environ.get(name) or "") >= 8:
+            text = text.replace(os.environ[name], f"<{name}>")
+    return text
 
 
 def _last_result(stdout):
@@ -71,13 +126,18 @@ def _record(root, mode, prompt, data):
     store = Store(root)
     stats = data.get("stats") or {}
     row = {"t": time.time(), "mode": mode, "prompt": prompt[:300], "status": data.get("status"), "stats": stats}
+    if data.get("last_message"):  # Bob's own answer at the end of the run
+        row["last_message"] = _hide_keys(_text(data["last_message"]))[:8000]
     if data.get("error"):  # why a run failed. Real Bob, Sept 27: every audit was "unparsed", and nothing said why
-        error = str(data["error"])[-300:]
-        for name in ("BOB_API_KEY", "TYPESAFE_API_KEY"):
-            if len(os.environ.get(name) or "") >= 8:
-                error = error.replace(os.environ[name], f"<{name}>")
-        row["error"] = error
+        row["error"] = _hide_keys(str(data["error"]))[-300:]
     store._append("bob_runs.jsonl", row)
+    if data.get("transcript"):  # the whole run, each tool output cut to 4,000 characters
+        lines = []
+        for e in data["transcript"]:
+            e = {k: (v if len(json.dumps(v)) <= 4000 else json.dumps(v)[:4000] + " [cut]") for k, v in e.items()}
+            lines.append(_hide_keys(json.dumps({"mode": mode, "task_id": stats.get("task_id"), **e})))
+        with store.locked(), open(store.dir / "bob_transcript.jsonl", "a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
     store.log({"stage": "bob_run", "action": data.get("status") or "done", "target": f"bob run --mode {mode}",
                "bob_stats": {k: stats.get(k) for k in ("session_costs", "tool_calls", "total_tokens", "duration_ms")
                              if k in stats}})

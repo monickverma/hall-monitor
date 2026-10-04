@@ -1,7 +1,10 @@
 """Everything Hall Monitor remembers lives in <repo>/.hallmonitor/ as JSON / JSONL."""
+import contextlib
 import hashlib
 import json
+import os
 import re
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -89,6 +92,41 @@ def now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _lock_fd(fd, timeout):
+    """An exclusive lock on the first byte of the open lock file, waiting up to `timeout` seconds."""
+    if os.name == "nt":
+        import msvcrt
+        deadline = time.time() + timeout
+        while True:
+            try:
+                os.lseek(fd, 0, 0)
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                return
+            except OSError:
+                if time.time() > deadline:
+                    raise TimeoutError("Hall Monitor's store is locked by another process")
+                time.sleep(0.02)
+    else:
+        import fcntl
+        fcntl.flock(fd, fcntl.LOCK_EX)
+
+
+def _unlock_fd(fd):
+    if os.name == "nt":
+        import msvcrt
+        try:
+            os.lseek(fd, 0, 0)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+    else:
+        import fcntl
+        fcntl.flock(fd, fcntl.LOCK_UN)
+
+
+_held = threading.local()  # how deep this thread is inside Store.locked(), so the lock is re-entrant
+
+
 class Store:
     def __init__(self, root):
         self.root = Path(root)
@@ -98,21 +136,79 @@ class Store:
         if not ignore.exists():
             ignore.write_text("*\n")
 
+    # One writer at a time. Every hook event is a separate process, and Bob runs tool calls in parallel. Real Bob
+    # IDE, Oct 4: two parallel `Get-Content` calls tore two lines of events.jsonl, and the Stop hook then failed
+    # reading it (JSONDecodeError), so the task's last check and its Hall Pass never ran. On Windows an append is not
+    # atomic across processes.
+    @contextlib.contextmanager
+    def locked(self, timeout=60):
+        depth = getattr(_held, "depth", {})
+        key = str(self.dir.resolve())
+        if depth.get(key):
+            depth[key] += 1
+            try:
+                yield
+            finally:
+                depth[key] -= 1
+            return
+        fd = os.open(self.dir / ".lock", os.O_RDWR | os.O_CREAT)
+        try:
+            _lock_fd(fd, timeout)
+            depth[key] = 1
+            _held.depth = depth
+            try:
+                yield
+            finally:
+                depth[key] = 0
+                _unlock_fd(fd)
+        finally:
+            os.close(fd)
+
     def _json(self, name, default):
         p = self.dir / name
-        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else default
+        for attempt in range(5):  # a file is only ever swapped in whole (_write), but stay safe on a bad read
+            if not p.exists():
+                return default
+            try:
+                return json.loads(p.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, PermissionError):
+                if attempt == 4:
+                    raise
+                time.sleep(0.05)
 
     def _write(self, name, data):
-        (self.dir / name).write_text(json.dumps(data, indent=2), encoding="utf-8")
+        self._replace(name, json.dumps(data, indent=2))
+
+    def _replace(self, name, text):
+        """Write a file whole: to a temporary file, then swapped in, so a reader never sees half of it."""
+        with self.locked():
+            tmp = self.dir / f".{name}.{os.getpid()}.tmp"
+            tmp.write_text(text, encoding="utf-8")
+            for attempt in range(20):  # Windows refuses the swap while another process has the file open
+                try:
+                    os.replace(tmp, self.dir / name)
+                    return
+                except PermissionError:
+                    if attempt == 19:
+                        raise
+                    time.sleep(0.05)
 
     def _jsonl(self, name):
+        """The rows of a JSON-lines file. A torn line (written before appends were locked) is skipped, not fatal."""
         p = self.dir / name
         if not p.exists():
             return []
-        return [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
+        rows = []
+        for line in p.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        return rows
 
     def _append(self, name, row):
-        with open(self.dir / name, "a", encoding="utf-8") as f:
+        with self.locked(), open(self.dir / name, "a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
 
     # config -----------------------------------------------------------------
@@ -166,10 +262,11 @@ class Store:
 
     # declared intents (MCP declare_intent) -------------------------------------------
     def add_intent(self, row):
-        s = self.session()
-        row = {"id": f"I{len(s['intents']) + 1}", "t": time.time(), **row}
-        s["intents"].append(row)
-        self.save_session(s)
+        with self.locked():
+            s = self.session()
+            row = {"id": f"I{len(s['intents']) + 1}", "t": time.time(), **row}
+            s["intents"].append(row)
+            self.save_session(s)
         return row
 
     def revoke_intent(self, intent_id, why):
@@ -257,8 +354,9 @@ class Store:
         return self._jsonl("evidence.jsonl")
 
     def add_evidence(self, row):
-        row = {"id": f"E{len(self.evidence()) + 1}", "t": time.time(), **row}
-        self._append("evidence.jsonl", row)
+        with self.locked():  # the count and the append together, or two parallel commands both become the same E<n>
+            row = {"id": f"E{len(self.evidence()) + 1}", "t": time.time(), **row}
+            self._append("evidence.jsonl", row)
         return row
 
     # decision ledger: append-only, decisions are superseded, never overwritten ----------------
@@ -284,7 +382,9 @@ class Store:
             row["per_action"] = per_action
         if session:
             row["session"] = session
-        self._append("ledger.jsonl", row)
+        with self.locked():
+            row["id"] = f"D{len(self.ledger()) + 1}"
+            self._append("ledger.jsonl", row)
         return row
 
     def agents_md_decisions(self):
@@ -304,4 +404,4 @@ class Store:
         return self._jsonl("events.jsonl")
 
     def write_report(self, name, text):
-        (self.dir / name).write_text(text, encoding="utf-8")
+        self._replace(name, text)

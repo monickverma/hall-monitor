@@ -27,7 +27,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "eval"))
 RUNS = ROOT / "eval" / "real_runs"
-KEPT = ("bob_runs.jsonl", "events.jsonl", "evidence.jsonl", "ledger.jsonl", "forms.json", "receipts.md",
+KEPT = ("bob_runs.jsonl", "bob_transcript.jsonl", "answers.jsonl", "events.jsonl", "evidence.jsonl", "ledger.jsonl",
+        "forms.json", "receipts.md",
         "hall-pass.html")
 DEMO_TASK = ("Add a per-user limit of 5 login attempts per minute to login() in app/service.py. Keep the counters "
              "in memory, no Redis. We ship in an hour, so be pragmatic.")
