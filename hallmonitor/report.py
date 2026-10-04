@@ -231,13 +231,22 @@ def write_hall_pass(store):
     ]
     loops_html = "".join(f'<span class="feat">{e(k)} <b>{v}</b></span>' for k, v in loops)
 
+    # Any ending short of VERIFIED leaves the changes in the working tree: Hall Monitor flags, it never undoes. Real Bob,
+    # Oct 4 (eval/compare.py): an untested change Receipts sent back stayed in the repo, and the Hall Pass said only
+    # "SENT BACK". So name the files, and how to roll back, for every unverified ending.
     stuck_html = ""
-    if status == "stuck" and receipts:
-        from . import receipts as R
+    if status in ("stuck", "send_back", "needs_evidence", "audit") and receipts:
+        from . import gitutil, receipts as R
+        from .store import is_protected
         failing = [r for r in receipts["rows"] if r.get("state") != "verified"]
-        stuck_html = ('<h2>Stuck</h2><section><table>' +
+        changed = sorted(f for f in gitutil.changes(store.root, sess.get("base"))
+                         if not is_protected(store.root, f)) if sess.get("base") else []
+        title = "Stuck" if status == "stuck" else "Not verified yet"
+        stuck_html = (f'<h2>{title}</h2><section><table>' +
                       "".join(f'<tr><td>{chip(r["state"])}</td><td>{e(r["claim"])}<div class="why">'
                               f'{e(r.get("detail") or r.get("code") or "")}</div></td></tr>' for r in failing) +
+                      (f'<tr><td class="stage">in your tree</td><td class="why">These changes are in the working tree '
+                       f'and are not verified: {e(", ".join(changed))}</td></tr>' if changed else "") +
                       f'<tr><td class="stage">next</td><td class="why">{e(R.restore_advice(receipts.get("checkpoint")))}'
                       '</td></tr></table></section>')
 

@@ -421,3 +421,21 @@ def test_a_home_path_is_scrubbed_however_it_is_escaped_or_cut_short(tmp_path):
     out = real_run.scrub(text, tmp_path)
     assert Path.home().name.lower() not in out.lower().replace("<home>", "")
     assert out.count("<home>") == 5
+
+
+def test_the_hall_pass_names_unverified_changes_left_in_the_tree_after_a_send_back(tmp_path, monkeypatch):
+    """eval/compare.py, Oct 4: an untested change Receipts sent back stayed in the repo; the Hall Pass said only
+    SENT BACK."""
+    from conftest import PASSING, FakeJev, make_repo
+    from hallmonitor import evidence as EV, jev, report
+    monkeypatch.setattr(jev, "ask", FakeJev(verdict=("says_nothing", 0.9)))
+    store = make_repo(tmp_path, {"app/__init__.py": "", "app/service.py": "def login(u):\n    return 'ok'\n"},
+                      config={"test_command": PASSING, "max_mutants": 0, "max_extreme_mutants": 0})
+    text = "def login(u):\n    if not u:\n        raise ValueError('empty')\n    return 'ok'\n"
+    (store.root / "app/service.py").write_text(text, encoding="utf-8")
+    EV.record({"tool": "write_file", "input": {"path": "app/service.py", "content": text}}, store)
+    result = receipts.verify(store, [{"claim": "login() rejects an empty username.", "evidence": ["E1"]}])
+    assert result["status"] == "send_back"
+    report.write_hall_pass(store)
+    page = (store.dir / "hall-pass.html").read_text(encoding="utf-8")
+    assert "Not verified yet" in page and "app/service.py" in page and "never rolls back by itself" in page
