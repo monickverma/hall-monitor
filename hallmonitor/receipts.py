@@ -74,6 +74,32 @@ MD_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 TABLE_ROW_RE = re.compile(r"^\|.*\|$")
 TABLE_SEP_RE = re.compile(r"^\|?\s*:?-{3,}")
 RULE_CELL_RE = re.compile(r"^(D\d+\b|rules?$)", re.I)
+STATUS_MARK_RE = re.compile("[✅✔✓☑]")  # ✅ ✔ ✓ ☑
+RULE_LED_RE = re.compile(r"^[*_`(\s]*D\d+\b")
+
+
+def _bare(line):
+    """The line without the markdown emphasis around it: "*What was preserved (untouched):**" ends in ":"."""
+    return re.sub(r"^[*_`\s]+|[*_`\s]+$", "", line)
+
+
+def is_heading(line):
+    """A heading, or a line ending in ":" that introduces what follows. Real Bob, Oct 4: a summary's
+    "*What was preserved (untouched):**" was judged as a claim, because its colon sat inside the bold markers."""
+    bare = _bare(line)
+    return bare.startswith("#") or bare.endswith(":")
+
+
+def restates_rule(text, cited):
+    """A line that only restates where a recorded rule stands ("No new dependencies added (D3 ✅)", "D1 is a process
+    gate satisfied outside this task"), citing no receipt. Receipts judges every obligation itself and the step
+    monitor checks every limit on each action, so such a line adds nothing, and like a table row about a rule it is
+    not a claim. Real Bob, Oct 4: a one-line docstring task ended STUCK on three of them, the D1 one an argument with
+    the D1 question Receipts had already put to the user. A line saying rules were recorded is a claim about the
+    ledger and stays."""
+    if cited or RECORDED_RE.search(text) or not DECISION_RE.search(text):
+        return False
+    return bool(STATUS_MARK_RE.search(text) or RULE_LED_RE.match(text))
 
 
 def _under_headers(text):
@@ -94,9 +120,9 @@ def _under_headers(text):
             if TABLE_SEP_RE.match(line) or TABLE_SEP_RE.match(nxt) or RULE_CELL_RE.match(cells[0]):
                 continue
             line = " - ".join(c for c in cells if c)
-        if line.startswith("#") or line.endswith(":"):  # headings and introductions are never claims
+        if is_heading(line):  # headings and introductions are never claims
             tag = ""
-            if line.endswith(":") and (BULLET_RE.match(nxt) or nxt.endswith(":")):
+            if _bare(line).endswith(":") and (BULLET_RE.match(nxt) or is_heading(nxt)):
                 plain = re.sub(r"[*`]+", "", MD_LINK_RE.sub(r"\1", line))
                 refs = list(dict.fromkeys(FILE_RE.findall(plain) + CITE_RE.findall(plain)))
                 tag = f" [{HEADER_TAG} {' '.join(refs)}]" if refs else ""
@@ -122,7 +148,7 @@ def parse(claims_or_summary):
         else:
             text = str(c).strip()
             ids = CITE_RE.findall(text)
-        if text:
+        if text and not is_heading(text) and not restates_rule(text, ids):
             out.append((text, list(dict.fromkeys(ids))))
     return out
 
@@ -284,10 +310,11 @@ def own_test_command(cmd, claims, known, root):
     return f"{cmd} {' '.join(tests)}" if tests and "pytest" in cmd else None
 
 
-def certify(kind, cited, named, changed, ledger, fresh, unknown=(), own=None):
+def certify(kind, cited, named, changed, ledger, fresh, unknown=(), own=None, inert=()):
     """The certificate check, in code. Returns None (go on to Jev) or (state, reason_code, detail).
     `unknown`: code files the claim names that exist nowhere in the repo (fabricated.unknown_files).
-    `own`: in a subagent's round, the files its claim names; only their edits make its test run stale."""
+    `own`: in a subagent's round, the files its claim names; only their edits make its test run stale.
+    `inert`: changed files with no behavior change (gitutil.behavior_lines); their edits don't make a test run stale."""
     if unknown and kind in CHANGE_KINDS:  # v4.2: a claim about a file that doesn't exist is false, however cited
         return "contradicted", "unknown_file", FB.message(unknown)
     # What the claim itself says about files is decided first: a claim that files changed when none of
@@ -317,8 +344,13 @@ def certify(kind, cited, named, changed, ledger, fresh, unknown=(), own=None):
         return ("needs_evidence", "out_of_scope",
                 f"None of {', '.join(cited)} touches {', '.join(named)}. Cite the receipts for those files.")
     if tests:
-        last_edit = EV.last_code_edit_seq(r for r in ledger.values() if own is None or r.get("file") in own)
-        if tests[-1]["edit_seq"] < last_edit:
+        # Real Bob, Oct 4 (failed-command): once a failed run became a receipt, "Ran pytest tests/test_missing.py; it
+        # exited with code 1" came back stale four rounds running, after an edit that only added a docstring, and the
+        # task ended STUCK. A failed run is a record of the failure, which no later edit undoes; and an edit that
+        # changes no behavior doesn't make any run stale.
+        last_edit = EV.last_code_edit_seq(r for r in ledger.values()
+                                          if (own is None or r.get("file") in own) and r.get("file") not in inert)
+        if tests[-1]["status"] != "fail" and tests[-1]["edit_seq"] < last_edit:
             return ("needs_evidence", "stale", f"{tests[-1]['id']} ran before your last code edit (#{last_edit}). "
                     "Re-run the tests and cite the new run.")
         if tests[-1]["status"] == "pass" and not fresh["passed"]:
@@ -424,6 +456,7 @@ KIND_RULES = [
 
 def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main"):
     t0 = time.time()
+    EV.settle_pending(store, agent=agent)  # a test run that failed is a receipt, though Bob never reported it back
     cfg, sess = store.config(), store.session()
     parsed = parse(claims_or_summary)
     tok = 0
@@ -482,6 +515,8 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
     cmd = own_test_command(cfg["test_command"], claims, known, store.root) if agent != "main" else None
     cmd = cmd or cfg["test_command"]
     tests = gitutil.run_tests(store.root, cmd)
+    # Files whose changes are only docstrings, comments or blank lines: editing them can't make a test run stale.
+    inert = {f for f, ch in all_changes.items() if not gitutil.behavior_lines(store.root, sess.get("base"), {f: ch})}
 
     for c in claims:
         # A header's files tell where an item is; they aren't what a claim that something stayed the
@@ -501,7 +536,7 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
         cert = about_rules if c["from"] == "ledger" else about_rules or \
             certify(c["kind"], c["cited"], c["named"], all_changes, ledger, tests,
                     FB.unknown_files(store.root, sess.get("base"), c["claim"], known),  # v4.2 fabricated files
-                    own=c["named"] if agent != "main" and c["named"] else None)
+                    own=c["named"] if agent != "main" and c["named"] else None, inert=inert)
         if cert and cert[1] == "uncited" and not free_retry:
             cert, c["uncited_fallback"] = None, True  # after the free retry: judged the old way, marked uncited
         c["cert"] = cert
@@ -655,6 +690,15 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
         r.update(state="cant_check", code="ask_user", action="audit",
                  detail="This rule came back \"needs evidence\" twice on the same diff, so resubmitting won't "
                         "settle it. Ask the user whether the finished work satisfies it.")
+    # Bob's own claims about a rule that has gone to the user join that question. Real Bob, Oct 4 (docstring-auth):
+    # with D1 already put to the user, Bob's "D1 is a merge-gate process rule, not ..." came back "needs evidence"
+    # and cost a send-back, the round that had ended this task STUCK the same morning.
+    asked_ids = {m.group(1) for r in asked for m in [re.search(r"project rule (D\d+)", r["claim"])] if m}
+    for r in rows:
+        named = {f"D{n}" for a, b in DECISION_RE.findall(r["claim"]) for n in range(int(a), int(b or a) + 1)}
+        if claims[r["index"]]["from"] == "agent" and r["state"] == "needs_evidence" and named & asked_ids:
+            r.update(state="cant_check", code="ask_user", action="audit",
+                     detail=f"Receipts has already asked the user about {', '.join(sorted(named & asked_ids))}.")
 
     bad = [r for r in rows if r["action"] == "send_back"]
     free = bool(bad) and free_retry and all(r["code"] == "uncited" and r["tier"] == "code" for r in bad)

@@ -60,8 +60,18 @@ def _exists(tok, names):
     return any(n == t or n.endswith("/" + t) for n in names)
 
 
+# A claim about a file's absence names a file that doesn't exist, and is true. Real Bob, Oct 4 (failed-command): "Ran
+# python -m pytest tests/test_missing.py, the file does not exist, so pytest ..." came back CONTRADICTED as unknown_file.
+ABSENCE_RE = re.compile(r"\b(do(es)?|did)\s*n[o']t\s+exist|\bnot\s+(found|exist)|\bmissing\b|\bno such file|"
+                        r"\bnon-?existent\b", re.I)
+CREATION_RE = re.compile(r"\b(add|creat|wr[io]te|writ|implement|introduc)\w*", re.I)
+
+
 def unknown_files(root, base, claim, known):
-    """The code files `claim` names that exist nowhere in the repo (see the module docstring)."""
+    """The code files `claim` names that exist nowhere in the repo (see the module docstring). A claim that says a
+    file is absent, and not that it was made, is about that absence (Jev still judges it)."""
+    if ABSENCE_RE.search(claim) and not CREATION_RE.search(claim):
+        return []
     todo = [t for t in mentioned_paths(claim) if not _exists(t, {k.lower() for k in known})]
     if not todo:
         return []

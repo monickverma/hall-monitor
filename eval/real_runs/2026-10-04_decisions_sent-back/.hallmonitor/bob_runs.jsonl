@@ -1,0 +1,1 @@
+{"t": 1791078945.5793755, "mode": "supervised", "prompt": "/decisions docs/security-policy.pdf", "status": "success", "stats": {"task_id": "74bb33493a9896d4ffab51888e853f7c", "duration_ms": 106982, "session_costs": 1.015774, "max_cost": 1, "tool_calls": 27}, "error": "The task reached the cost limit of 1.00 (spent: 1.02)."}

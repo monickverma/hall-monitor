@@ -11,7 +11,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from . import brief, jev, lessons, payload as P, receipts, step
+from . import brief, evidence, jev, lessons, payload as P, receipts, step
 from .store import Store, rel_path
 
 # When Jev refuses a request (HTTP 403), every hook falls back here instead of the generic error path,
@@ -51,6 +51,8 @@ def handle(payload):
     if handler is None:
         return 0, "", ""
     try:
+        if P.event(payload) in ("Stop", "UserPromptSubmit"):  # the turn is over: nothing is still running
+            evidence.settle_pending(store)
         try:
             code, out, err = handler(payload, store)
         except jev.JevRefused:

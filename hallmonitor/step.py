@@ -82,23 +82,34 @@ PROTECTED_NAMES = (".bob", ".hallmonitor")
 PROTECTED_TOKEN_RE = re.compile(r"(?:^|[\s'\"=/\(,])([\w*?~.\[\]-]+)(?=[/\\\s'\")]|$)")
 SHORT_NAME_RE = re.compile(r"^\.?(hallmo|bob)\w*~\d+$")
 READ_ONLY_RE = re.compile(r"^\s*(cat|type|ls|dir|more|head|tail|get-content|get-childitem|get-item|test-path|"
-                          r"get-filehash|resolve-path|get-location|pwd|gc|gci|gi|findstr|select-string|"
+                          r"get-filehash|resolve-path|get-location|pwd|gc|gci|gi|findstr|select-string|echo|"
+                          r"write-output|write-host|"
                           r"git\s+(status|diff|log|show|ls-files|blame|rev-parse))\b", re.I)
 # Read-only filters a safe command may be piped into, and what makes a command more than the one safe command it
 # starts with: a redirect, a chained or backgrounded command, a sub-expression or a block. `cat x > app/auth.py`
 # matched the safe prefix `cat`, and so would `ls & rm x` or `cat (Remove-Item x)`. `2>&1` only merges streams.
+# `cat`, `echo` and `Write-Output` only print. Real Bob, Oct 4: `git show c97587c:app/auth.py | cat` was stopped for
+# want of a declared intent.
 PIPE_FILTER_RE = re.compile(r"^\s*(select-string|select-object|sort-object|measure-object|findstr|grep|sort|head|"
-                            r"tail|wc|more|out-string|format-\w+)\b", re.I)
+                            r"tail|wc|more|cat|out-string|format-\w+)\b", re.I)
 UNSAFE_SHELL_RE = re.compile(r">|<|;|&|\(|\)|\{|\}|\|\||`|\$|\n")
 STREAM_MERGE_RE = re.compile(r"\d?>&\d")
+# A command that runs inline code: a letter-free wildcard token in it (`.*`, `.*?`) is a regex, not a file name.
+INLINE_CODE_RE = re.compile(r"^\s*(python3?|py|node|perl|ruby)(\.exe)?\s+(-\w*\s+)*-[ce]\b", re.I)
 
 
 def names_protected(command):
     """True when a command names .bob/ or .hallmonitor/ in any form: the plain name, a wildcard that matches it
-    (.hallmon*, .b?b, .*), or a Windows 8.3 short name (HALLMO~1)."""
+    (.hallmon*, .b?b, .*), or a Windows 8.3 short name (HALLMO~1). Real Bob, Oct 4 (decisions): `python -c "...
+    re.findall(rb'\\((.*?)\\)', data) ..."` was stopped as protected, because `.*?` matches .bob as a wildcard; the task
+    spent its cost cap on workarounds. In inline code a wildcard counts only with a letter in it (`.b*`)."""
+    code = bool(INLINE_CODE_RE.match(command or ""))
     for m in PROTECTED_TOKEN_RE.finditer(command or ""):
         tok = m.group(1).lower()
-        if SHORT_NAME_RE.match(tok) or (tok.startswith(".") and any(fnmatch.fnmatch(n, tok) for n in PROTECTED_NAMES)):
+        if SHORT_NAME_RE.match(tok):
+            return True
+        if tok.startswith(".") and any(fnmatch.fnmatch(n, tok) for n in PROTECTED_NAMES) and \
+                (not code or re.search(r"[a-z]", tok)):
             return True
     return False
 
@@ -316,6 +327,7 @@ def declare_intent(store, intent, files=(), commands=(), agent="main", agent_tas
     """MCP tool: judge a plan of action before any tool runs; the answer goes straight back to Bob.
     (Pending notes and flags are put in front of every MCP result by the MCP server.)"""
     t0 = time.time()
+    evidence.settle_pending(store, agent=agent)  # this agent's failed command, if any, before its next intent is judged
     cfg, sess = store.config(), store.session()
     files = [rel_path(store.root, f) for f in files or []]
     commands = [evidence.repo_command(store.root, c) for c in commands or []]
@@ -383,6 +395,17 @@ def declare_intent(store, intent, files=(), commands=(), agent="main", agent_tas
                "doesn't say how you'll deal with that")
     row = store.add_intent({**base, "verdict": verdict, "why": why})
     s = store.session()
+    # A stall the other patterns miss: rewording a rejected intent for the same files until something gets through.
+    # Real Bob IDE, Oct 4: a docstring intent was rejected twice, and the third wording got through by adding a test
+    # nobody asked for. After the second rejection in a row, ask the user instead of rewording again.
+    rephrased = 0
+    for it in reversed(mine):
+        if it["verdict"] != "rejected" or not set(it.get("files", []) + it.get("commands", [])) & set(files + commands):
+            break
+        rephrased += 1
+    if verdict == "rejected" and rephrased:
+        evidence.stall(store, s, "rephrasing a rejected intent",
+                       f"an intent for {target} was rejected {rephrased + 1} times in a row")
     if failed is not None and not unhandled:  # the failed step has been dealt with
         s["failed_step"] = None
     if verdict != "rejected":  # v4 loop L3 -> L1: a fresh intent covers files a drifted subagent touched
@@ -413,11 +436,34 @@ def declare_intent(store, intent, files=(), commands=(), agent="main", agent_tas
         return (f"{row['id']}: Hall Monitor isn't sure about this intent:\n{why}\n"
                 "Call declare_intent again, saying exactly which change you'll make, in which files, and how it "
                 "serves the goal. If it's still unclear, the user will be asked.")
+    if rephrased:
+        n = rephrased + 1
+        return (f"{row['id']} REJECTED. Do not do this:\n{why}\n"
+                f"This is rejection {n} in a row for {target}. Don't reword it again, and don't add work nobody "
+                "asked for to get it through. Ask the user whether the rule should apply here, or what to do instead.")
     return (f"{row['id']} REJECTED. Do not do this:\n{why}\n"
             "Choose an approach that respects the active decisions, or ask the user to change them.")
 
 
 def pre_tool(p, store):
+    """PreToolUse. A command left pending by an earlier step that never reported back failed (evidence.settle_pending);
+    a command allowed now is pending until its PostToolUse arrives."""
+    if not store.session()["running_subagents"]:  # with subagents running, whose command is still running is unknown
+        evidence.settle_pending(store)
+    result = _pre_tool(p, store)
+    if result[0] == 0 and P.tool(p) in P.SPAWN_TOOLS:
+        s = store.session()
+        s["running_subagents"] += 1
+        store.save_session(s)
+    if result[0] == 0 and P.tool(p) in P.COMMAND_TOOLS:
+        _, command, _ = P.describe(P.tool(p), P.tool_input(p))
+        intent = store.intent_for(command=evidence.repo_command(store.root, command))
+        agent = intent["agent"] if intent else (None if store.session()["running_subagents"] else "main")
+        evidence.note_pending(store, p, agent)
+    return result
+
+
+def _pre_tool(p, store):
     cfg, sess = store.config(), store.session()
     tool = P.tool(p)
     path, command, detail_text = P.describe(tool, P.tool_input(p))
@@ -633,6 +679,11 @@ def post_tool(p, store):
     """PostToolUse can't block or talk back. Spawns get the return check; edits and commands become
     receipts in the evidence ledger (which also drives checkpoints and the stall counter)."""
     if P.tool(p) in P.SPAWN_TOOLS:
+        s = store.session()
+        s["running_subagents"] = max(0, s["running_subagents"] - 1)
+        store.save_session(s)
         return subagent_return(p, store)
+    if P.tool(p) in P.COMMAND_TOOLS:
+        evidence.clear_pending(store, p)
     evidence.record(p, store)
     return 0, "", ""
