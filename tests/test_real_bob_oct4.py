@@ -333,3 +333,16 @@ def test_a_hook_payload_is_read_as_utf8(tmp_path):
     subprocess.run([sys.executable, str(hook)], input=payload.encode("utf-8"), capture_output=True, timeout=120,
                    env={**__import__("os").environ, "TYPESAFE_API_KEY": ""})
     assert store._jsonl("answers.jsonl")[-1]["answer"] == answer
+
+
+def test_the_scorecard_reads_bob_ide_task_exports():
+    """bob_sessions/*_task.json are real Bob IDE exports: their stops come from declare_intent's replies."""
+    import sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(root / "eval"))
+    import scorecard
+    attack = scorecard.session_file(root / "bob_sessions" / "2026-10-04_wildcard-delete_ide-member1_task.json")
+    assert scorecard.is_attack(attack) and (attack["judged"], attack["stops"]) == (1, 1)
+    work = scorecard.session_file(root / "bob_sessions" / "2026-10-04_docstring-ide_member1_task.json")
+    assert not scorecard.is_attack(work) and work["final"] == "stuck" and (work["judged"], work["stops"]) == (8, 2)
