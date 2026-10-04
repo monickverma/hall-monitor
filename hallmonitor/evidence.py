@@ -123,7 +123,54 @@ def _circling(store, sess, key, label):
     sess["cycle"] = steps[-2 * CYCLE_WINDOW:]
 
 
-def record(p, store):
+# Bob 2.0.5 calls no PostToolUse hook when a tool call ends in error (bob.js, onToolResult: `isError || PostToolUse`),
+# so a failed command never reported back. In every real run up to Oct 4 there was no failed-command receipt, and the
+# outcome check (T2: the next intent must deal with a failure) never fired. PreToolUse always fires and PostToolUse
+# fires for every success, so a command that was allowed and never reported back ended in error.
+NO_POST_TOOL_USE = ("(no output: this command never reported back, and Bob calls no PostToolUse hook when a tool "
+                    "call ends in error, so it is recorded as failed)")
+
+
+def note_pending(store, p, agent):
+    """PreToolUse allowed a command: keep it until its PostToolUse arrives."""
+    sess = store.session()
+    _, command, _ = P.describe(P.tool(p), P.tool_input(p))
+    key = P.first(p, "tool_use_id") or f"{command}|{len(sess['pending_commands'])}"
+    sess["pending_commands"][key] = {"tool": P.tool(p), "command": command, "cwd": P.first(p, "cwd"), "agent": agent}
+    store.save_session(sess)
+
+
+def clear_pending(store, p):
+    """PostToolUse: the command reported back. Without a tool_use_id, the oldest entry for the same command."""
+    sess = store.session()
+    pending, key = sess["pending_commands"], P.first(p, "tool_use_id")
+    if key not in pending:
+        _, command, _ = P.describe(P.tool(p), P.tool_input(p))
+        key = next((k for k, v in pending.items() if v["command"] == command), None)
+    if key is not None:
+        pending.pop(key, None)
+        store.save_session(sess)
+
+
+def settle_pending(store, agent=None):
+    """Record as failed each pending command that never reported back: every one when `agent` is None, else only that
+    agent's own (another agent's command may still be running). A command allowed while subagents were running
+    belongs to no known agent, and is settled only once none is running."""
+    sess = store.session()
+    pending = sess["pending_commands"]
+    mine = [k for k, v in pending.items()
+            if agent is None or v["agent"] == agent or (v["agent"] is None and not sess["running_subagents"])]
+    if not mine:
+        return
+    failed = [pending.pop(k) for k in mine]
+    store.save_session(sess)
+    for v in failed:
+        record({"tool_name": v["tool"], "tool_input": {"command": v["command"]}, "cwd": v["cwd"],
+                "tool_response": {"content": NO_POST_TOOL_USE, "exit_code": 1}}, store,
+               source="no PostToolUse (Bob skips it for a failed tool call)")
+
+
+def record(p, store, source=None):
     """PostToolUse on an edit or a command: append a receipt and update the evidence signals."""
     cfg, sess = store.config(), store.session()
     tool = P.tool(p)
@@ -144,9 +191,9 @@ def record(p, store):
     if not command:
         return
     out = P.tool_output(p)
-    status, source = outcome(out, P.exit_code(p))
+    status, inferred = outcome(out, P.exit_code(p))
     kind = "test" if is_test_command(command, cfg) else "command"
-    row = store.add_evidence({"kind": kind, "command": command, "status": status, "status_source": source,
+    row = store.add_evidence({"kind": kind, "command": command, "status": status, "status_source": source or inferred,
                               "tail": out[-800:], "sha1": hashlib.sha1(out.encode("utf-8")).hexdigest()[:12],
                               "edit_seq": sess["edit_seq"]})
     sess["commands"].append({"command": command, "output": out[-800:]})

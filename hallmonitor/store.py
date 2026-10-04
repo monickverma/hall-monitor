@@ -127,7 +127,8 @@ class Store:
                      "edit_seq": 0, "edits_since_test": 0, "stalls": 0, "fail_repeats": {},
                      "failed_step": None, "regression_seen": None, "send_backs": 0, "verified_edit_seq": 0,
                      "uncited_retry_used": False, "last_send_back": None, "pending_audits": {},
-                     "suspect_files": {}, "fresh_intent_needed": {}, "rules_needing_evidence": {}}.items():
+                     "suspect_files": {}, "fresh_intent_needed": {}, "rules_needing_evidence": {},
+                     "pending_commands": {}, "running_subagents": 0}.items():
             s.setdefault(k, v)
         return s
 
@@ -179,6 +180,20 @@ class Store:
                 it["verdict"], it["why"] = "rejected", f"revoked: {why}"
         self.save_session(s)
 
+    def norm_command(self, command):
+        """A command as written, minus the ways one command is spelled differently: the repo's own absolute path,
+        quotes, backslashes, "./" and runs of spaces. Real Bob, Oct 4 (decisions): Bob declared `Get-Content
+        docs/security-policy.pdf ...`, ran `Get-Content "C:\\...\\docs\\security-policy.pdf" -Raw | ...`, and was
+        stopped four times for want of a declared intent."""
+        c = str(command or "").replace("\\", "/")
+        c = re.sub(re.escape(str(self.root.resolve()).replace("\\", "/")) + "/?", "", c, flags=re.I)
+        c = re.sub(r"(^|\s)\./", r"\1", c.replace('"', "").replace("'", ""))
+        return re.sub(r"\s+", " ", c).strip().lower()
+
+    def _covers_command(self, command, declared, both_ways=True):
+        c, d = self.norm_command(command), self.norm_command(declared)
+        return bool(c and d) and (c.startswith(d) or (both_ways and d.startswith(c)))
+
     def intent_for(self, path=None, command=None, max_age=1800):
         """Most recent non-rejected intent (any agent) covering this file or command; else the most
         recent rejected one, so a rejected plan stays blocked; else None."""
@@ -188,8 +203,7 @@ class Store:
             if time.time() - it["t"] > max_age:
                 break
             covers = (path and norm(path) in {norm(f) for f in it.get("files", [])}) or \
-                (command and any(command.strip().startswith(c.strip()) or c.strip().startswith(command.strip())
-                                 for c in it.get("commands", []) if c.strip()))
+                (command and any(self._covers_command(command, c) for c in it.get("commands", [])))
             if covers and it["verdict"] != "rejected":
                 return it
             if covers and rejected is None:
@@ -208,7 +222,7 @@ class Store:
                     (exclude_id and it.get("id") == exclude_id):
                 continue
             if (path and norm(path) in {norm(f) for f in it.get("files", [])}) or \
-                    (command and any(command.strip().startswith(c.strip()) for c in it.get("commands", []) if c.strip())):
+                    (command and any(self._covers_command(command, c, both_ways=False) for c in it.get("commands", []))):
                 out.append(it)
         return out
 

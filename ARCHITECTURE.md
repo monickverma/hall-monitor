@@ -62,6 +62,7 @@ LEVEL 2  POLICY (code: minimum expected loss)
   I/E  allow · approve-with-note · block        P  allow · block        R  accept · flag · send back
   Stall patterns (evidence.py): breaking a passing state · looping on one failure · editing without testing
     · repeating a rejected approach · going in circles (the last 6 steps repeat one 2- or 3-step sequence)
+    · rephrasing a rejected intent (step.py: a second rejection in a row for the same files sends Bob to the user)
     · past stall_limit: stop and ask the user, with a restart plan
 
 LEVEL 3  ESCALATION (expected value of partial information)

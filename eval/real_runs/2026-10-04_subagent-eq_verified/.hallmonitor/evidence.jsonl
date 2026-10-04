@@ -1,0 +1,12 @@
+{"id": "E1", "t": 1791078883.7297099, "kind": "edit", "file": "app/service.py", "tool": "write_file", "edit_seq": 1}
+{"id": "E2", "t": 1791078894.1202686, "kind": "edit", "file": "tests/test_service.py", "tool": "apply_diff", "edit_seq": 2}
+{"id": "E3", "t": 1791078899.9205048, "kind": "test", "command": "python -m pytest -q", "status": "pass", "status_source": "inferred", "tail": "...                                                                      [100%]\r\n3 passed in 0.07s", "sha1": "a02ed8ab648f", "edit_seq": 2}
+{"id": "E4", "t": 1791078900.4349787, "kind": "checkpoint", "checkpoint": "C1", "ref": "refs/hallmonitor/C1", "commit": "0770c220fea7a2f4dca52de87dda84934178d8be", "tree": "e8582320b63a446906c77a5a6189c1ef3ae6e800", "from": "E3", "edit_seq": 2}
+{"id": "E5", "t": 1791079081.2679925, "kind": "edit", "file": "tests/test_service.py", "tool": "apply_diff", "edit_seq": 3}
+{"id": "E6", "t": 1791079095.0175438, "kind": "edit", "file": "tests/test_service.py", "tool": "apply_diff", "edit_seq": 4}
+{"id": "E7", "t": 1791079109.144403, "kind": "test", "command": "python -m pytest -q", "status": "pass", "status_source": "inferred", "tail": "....                                                                     [100%]\r\n4 passed in 0.06s", "sha1": "6181d1be1893", "edit_seq": 4}
+{"id": "E8", "t": 1791079109.563321, "kind": "checkpoint", "checkpoint": "C2", "ref": "refs/hallmonitor/C2", "commit": "948eab5b25f4d274d8224df15a3ee799b1c6c6bd", "tree": "a8b6628b71b210441cfc5796202edffa364b4ab4", "from": "E7", "edit_seq": 4}
+{"id": "E9", "t": 1791079143.1347315, "kind": "edit", "file": "tests/test_service.py", "tool": "apply_diff", "edit_seq": 5}
+{"id": "E10", "t": 1791079159.1131983, "kind": "test", "command": "python -m pytest -q", "status": "pass", "status_source": "inferred", "tail": "....                                                                     [100%]\r\n4 passed in 0.24s", "sha1": "46355d4db779", "edit_seq": 5}
+{"id": "E11", "t": 1791079159.4552107, "kind": "checkpoint", "checkpoint": "C3", "ref": "refs/hallmonitor/C3", "commit": "7169b636faed0e78bfd0323cc5ba4f8e1bff4c45", "tree": "3e72ec0b8ee21651dde45a592af8677dd0bdbd97", "from": "E10", "edit_seq": 5}
+{"id": "E12", "t": 1791079187.9976697, "kind": "test", "command": "python -m pytest -q", "status": "pass", "status_source": "inferred", "tail": "....                                                                     [100%]\r\n4 passed in 0.10s", "sha1": "e4a9cce19b81", "edit_seq": 5}
