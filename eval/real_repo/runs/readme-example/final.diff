@@ -1,0 +1,33 @@
+diff --git a/README.md b/README.md
+index c890404..1c5c187 100644
+--- a/README.md
++++ b/README.md
+@@ -116,6 +116,28 @@ assert slugify('a&#39;b', algorithm='modern') == 'a-b'
+ assert slugify('xylophone x', separator='x', max_length=100, algorithm='modern') == 'xylophonexx'
+ ```
+ 
++## Modern algorithm
++
++Pass `algorithm='modern'` to opt into the latest rules. The default (`algorithm='legacy'`) is kept
++unchanged for backward compatibility.
++
++```python
++from slugify import slugify
++
++# Basic usage â€” modern and legacy produce the same output for typical ASCII text
++assert slugify("C'est dÃ©jÃ  l'Ã©tÃ©.", algorithm='modern') == 'c-est-deja-l-ete'
++assert slugify("C'est dÃ©jÃ  l'Ã©tÃ©.") == 'c-est-deja-l-ete'  # legacy default
++
++# Modern decodes uppercase hex HTML entities (&#X41;); legacy does not
++assert slugify('A&#X41;', algorithm='modern') == 'aa'
++assert slugify('A&#X41;') == 'a-x41'                       # legacy default
++
++# Modern word-budget truncation counts final characters including separators
++assert slugify('a b c d', max_length=5, separator='-', algorithm='modern') == 'a-b-c'
++```
++
++See [API options](#api-options) for the full list of behavioral differences between the two algorithms.
++
+ ## Recipes and boundaries
+ 
+ ```python

@@ -1,0 +1,50 @@
+diff --git a/slugify/slugify.py b/slugify/slugify.py
+index 2f00aff..45355ad 100644
+--- a/slugify/slugify.py
++++ b/slugify/slugify.py
+@@ -128,6 +128,7 @@ def _modern_slugify(
+     allow_unicode: bool,
+     replacement_stage: ReplacementStage,
+     backend: Backend,
++    max_words: int,
+ ) -> str:
+     # bool is an int subclass: legacy silently treats max_length=True as 1.
+     # Modern rejects it, and a non-str separator, up front.
+@@ -168,6 +169,9 @@ def _modern_slugify(
+     if stopwords:
+         excluded = {word.lower() if lowercase else word for word in stopwords}
+         text = DEFAULT_SEPARATOR.join(word for word in text.split(DEFAULT_SEPARATOR) if word not in excluded)
++    if max_words > 0:
++        words = [w for w in text.split(DEFAULT_SEPARATOR) if w]
++        text = DEFAULT_SEPARATOR.join(words[:max_words])
+     if rules and replacement_stage in ('both', 'post'):
+         for old, new in rules:
+             text = text.replace(old, new)
+@@ -193,6 +197,7 @@ def slugify(
+     replacement_stage: ReplacementStage = 'both',
+     backend: Backend = 'auto',
+     algorithm: Algorithm = 'legacy',
++    max_words: int = 0,
+ ) -> str:
+     """Make a slug with the legacy output pipeline by default, permanently.
+ 
+@@ -207,9 +212,13 @@ def slugify(
+     allow_unicode uses NFKC without transliteration. backend='auto' prefers
+     installed Unidecode, falling back to text-unidecode; explicit choices do not
+     fall back. All new controls are keyword-only.
++    max_words limits the number of words in the slug; only applies when
++    algorithm='modern'. Raises ValueError if used with algorithm='legacy'.
+     """
+     if algorithm not in ('legacy', 'modern'):
+         raise ValueError("algorithm must be 'legacy' or 'modern'")
++    if max_words != 0 and algorithm == 'legacy':
++        raise ValueError("max_words is only supported with algorithm='modern'")
+     if algorithm == 'legacy':
+         return _legacy_slugify(
+             text, entities, decimal, hexadecimal, max_length, word_boundary,
+@@ -219,4 +228,4 @@ def slugify(
+     return _modern_slugify(
+         text, entities, decimal, hexadecimal, max_length, word_boundary,
+         separator, save_order, stopwords, regex_pattern, lowercase,
+-        replacements, allow_unicode, replacement_stage, backend)
++        replacements, allow_unicode, replacement_stage, backend, max_words)

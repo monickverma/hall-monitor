@@ -116,7 +116,10 @@ def _call(name, args, store):
         return review.message(review.after_verify(store, result, args.get("review_notes")))
     if name == "hall_pass":
         path, summary = report.write_hall_pass(store)
-        return f"{summary}\nHall Pass: {path}"
+        # Real Bob Shell, Oct 4: Bob read the report with a shell command (`$html = Get-Content ...hall-pass.html; ...`),
+        # which names Hall Monitor's records, and Hall Monitor stopped its own protocol's last step three times.
+        return (f"{summary}\nHall Pass: {path}\nRead it with your read_file tool (a shell command that names "
+                ".hallmonitor/ is blocked), then publish it.")
     raise ValueError(f"unknown tool {name}")
 
 

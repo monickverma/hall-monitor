@@ -185,6 +185,11 @@ FAILS_WITHOUT_RE = re.compile(r"\btests?\b.{0,60}\bfails?\b.{0,30}\bwithout\b.{0
 # the testing requirement." Real Bob, Sept 27: Jev couldn't settle it from the diff, so it went to an audit in
 # four of the subagent runs, and each audit cost Bob a round.
 ASSERTS_CHANGE_RE = re.compile(r"\btests?\b.{0,60}\bassert\w*\b.{0,40}\bchang\w*\b.{0,20}\bbehavio", re.I)
+# Any other wording that ties tests to new or changed behavior. Real Bob on python-slugify, Oct 4: its rule "New or
+# changed behavior is covered by tests in a separate file under tests/" was held against a docstring-only change and
+# went to the user, because only the demo policy's phrasings were recognized.
+BEHAVIOR_TESTS_RE = re.compile(r"\b(new|chang\w*)\b.{0,20}\bbehavio\w*\b.{0,80}\btest|"
+                               r"\btests?\b.{0,80}\b(new|chang\w*)\b.{0,20}\bbehavio", re.I)
 CONDITIONAL_RE = re.compile(r"^\s*(any\s+)?(changes?|edits?|modifications?)\s+(to|of|in)\b"
                             r"|\b(if|when|whenever)\b.{0,80}\b(chang|edit|modif|touch)", re.I)
 
@@ -274,7 +279,8 @@ def no_behavior_change(rule, root, base, changes_):
     """A rule about the tests a behavior change needs holds when no changed line outside the tests changes
     behavior: only docstrings, comments or blank lines changed (gitutil.behavior_lines). Returns None when the
     rule does apply."""
-    if not base or not (FAILS_WITHOUT_RE.search(rule) or ASSERTS_CHANGE_RE.search(rule)):
+    if not base or not (FAILS_WITHOUT_RE.search(rule) or ASSERTS_CHANGE_RE.search(rule)
+                        or BEHAVIOR_TESTS_RE.search(rule)):
         return None
     if gitutil.behavior_lines(root, base, changes_):
         return None
@@ -739,6 +745,8 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
     sess.setdefault("audit_briefs", {})[agent] = [a["brief"] for a in audits]  # step.requested_audit matches these
     if agent == "main":
         sess["send_backs"] = count
+        sess["last_round"] = {"status": status, "edit_seq": sess["edit_seq"],
+                              "asks_user": any(r.get("code") == "ask_user" for r in rows)}
     else:
         counts[agent] = count
     if status == "accept" and agent == "main":  # the Stop backstop leaves work verified up to here alone
@@ -849,7 +857,12 @@ def stop_hook(store, text):
     with no edits (/decisions), put its uncited sentences over a VERIFIED result (preflight, Sept 27) and
     spent the free retry. So only edits no accepted submission covers make the message a claim."""
     sess = store.session()
-    if text and sess["edit_seq"] > sess["verified_edit_seq"]:
+    # A round that ended by asking the user, with no edit since, leaves Bob waiting on the user: its last message is
+    # that question, not new claims. Real Bob on python-slugify, Oct 4: after D5 went to the user, Bob's question
+    # ("Does this docstring-only change satisfy D5?") was judged sentence by sentence as uncited claims.
+    last = sess.get("last_round") or {}
+    waiting = last.get("asks_user") and last.get("edit_seq") == sess["edit_seq"]
+    if text and sess["edit_seq"] > sess["verified_edit_seq"] and not waiting:
         result = verify(store, text, source="stop")
         if result["status"] != "accept":
             store.queue_note(message(result))

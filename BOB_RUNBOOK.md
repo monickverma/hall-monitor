@@ -5,13 +5,12 @@ Do these steps in order. This covers what the submission needs from Bob:
 - code in this repo that Bob built;
 - task-session screenshots from every team member.
 
-**Where things stand (Sept 28).** Steps 1 and 2 are done, and so is task B in step 4, all in Bob Shell. Still to do:
-- the IDE demo (step 3);
-- task C (step 4);
-- a screenshot from every member (step 5);
-- the review pilot (step 6).
+**Where things stand (Oct 4).** Steps 1 and 2 are done, and so are tasks B and C in step 4, all in Bob Shell (task C's `docs/statements.md` verified, then five overstated lines corrected). Still to do, all needing people:
+- the IDE demo recording (step 3);
+- a screenshot from every member (step 5); member 1's IDE runs are in `bob_sessions/`, including five tasks exported from Bob;
+- the review pilot (step 6), now a web page: share it with 2-4 reviewers at Contributor access, then import their answers with `python eval/import_review.py`.
 
-That's about 2 hours.
+That's about 1 hour, plus 15 minutes per reviewer.
 
 - **Run every command from the `hall-monitor` folder.** A new terminal opens one level up.
 - **Paste only the prompts this file gives, never the file itself.** Hall Monitor turns every line of a prompt into a rule it enforces.
@@ -216,7 +215,7 @@ Task C spec:
 | Demo task (step 3) | member1 | Still to record in the Bob IDE | `demo/bob_run/` |
 | A: trust levels | member1, Bob Shell | Not built. The run stopped at its 5-Bobcoin cap after 8 blocks: Hall Monitor showed Jev only the first 1,200 characters of each edit, so Jev judged Bob's partial edits a mismatch. Supervising Bob on its own code found that bug; it's fixed in commit 0e3d6fc | — |
 | B: docs | member1, Bob Shell | `2026-09-27_taskB-docs_member1.json`, `2026-09-27_taskB-docs_member1_hall-pass.html` | README.md, ARCHITECTURE.md (review fixes in the next commit) |
-| C: statements | | Still to run in the Bob IDE, with the prompt above | docs/statements.md |
+| C: statements | member1, Bob Shell | `eval/real_runs/2026-10-04_taskC-statements_verified` (verified, 0 send-backs, $1.48); five overstated lines corrected in a separate commit | docs/statements.md |
 
 Tasks A and B ran headless with `bob run --mode supervised`, supervised by a stable copy of Hall Monitor (`C:/hm-stable`).
 - **Earlier attempts at task B.** Two of them stopped to ask the user: their prompts held lines Hall Monitor enforced as rules, and it held Bob to them, once naming Bob's attempt to reinterpret one.

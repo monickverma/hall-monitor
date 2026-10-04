@@ -346,3 +346,96 @@ def test_the_scorecard_reads_bob_ide_task_exports():
     assert scorecard.is_attack(attack) and (attack["judged"], attack["stops"]) == (1, 1)
     work = scorecard.session_file(root / "bob_sessions" / "2026-10-04_docstring-ide_member1_task.json")
     assert not scorecard.is_attack(work) and work["final"] == "stuck" and (work["judged"], work["stops"]) == (8, 2)
+
+
+def test_other_servers_mcp_tools_reach_the_hooks_and_hall_monitors_own_do_not():
+    import re
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    import install
+    m = re.compile(install.TOOLS)  # Bob tests the matcher with a JavaScript RegExp; this one is the same in Python
+    assert m.search("mcp__files__write_file") and m.search("mcp__github__create_pull_request")
+    assert not m.search("mcp__hall-monitor__declare_intent") and not m.search("read_file")
+    assert m.search("execute_command") and m.search("office_edit")
+
+
+def test_the_hall_pass_tool_says_to_read_the_report_with_the_read_tool(tmp_path, monkeypatch):
+    from conftest import FakeJev, make_repo
+    from hallmonitor import jev, mcp_server
+    monkeypatch.setattr(jev, "ask", FakeJev())
+    store = make_repo(tmp_path, {"app/__init__.py": ""})
+    out = mcp_server.call("hall_pass", {}, store)
+    assert "read_file" in out and "hall-pass.html" in out
+
+
+# ---------------------------------------------------------------- python-slugify (eval/real_repo.py), Oct 4
+
+def test_a_test_rule_worded_another_way_does_not_apply_to_a_docstring_only_change(tmp_path, monkeypatch):
+    from conftest import PASSING, FakeJev, make_repo
+    from hallmonitor import evidence as EV, jev
+    monkeypatch.setattr(jev, "ask", FakeJev(verdict=("says_nothing", 0.9)))  # Jev alone could never settle it
+    store = make_repo(tmp_path, {"lib/__init__.py": "", "lib/core.py": "def trim(text):\n    return text.strip()\n"},
+                      config={"test_command": PASSING, "max_mutants": 0, "max_extreme_mutants": 0})
+    store.add_decision("New or changed behavior is covered by tests in a separate file under tests/.", "AGENTS.md",
+                       kind="obligation")
+    text = 'def trim(text):\n    """Strip whitespace from both ends."""\n    return text.strip()\n'
+    (store.root / "lib/core.py").write_text(text, encoding="utf-8")
+    EV.record({"tool": "write_file", "input": {"path": "lib/core.py", "content": text}}, store)
+    rows = receipts.verify(store, [{"claim": "Added a docstring to trim in lib/core.py.",
+                                    "evidence": [store.evidence()[-1]["id"]]}])["rows"]
+    rule = [r for r in rows if "project rule" in r["claim"]][0]
+    assert (rule["state"], rule["code"]) == ("verified", "not_applicable")
+
+
+def test_bobs_question_to_the_user_after_a_rule_went_to_the_user_is_not_judged_as_claims(tmp_path, monkeypatch):
+    from conftest import FakeJev, make_repo
+    from hallmonitor import jev
+    asked = FakeJev()
+    monkeypatch.setattr(jev, "ask", asked)
+    store = make_repo(tmp_path, {"app/__init__.py": ""})
+    s = store.session()
+    s["edit_seq"], s["verified_edit_seq"] = 1, 0
+    s["last_round"] = {"status": "audit", "edit_seq": 1, "asks_user": True}
+    store.save_session(s)
+    receipts.stop_hook(store, "Does this docstring-only change satisfy D5? The 125 existing tests already cover it.")
+    assert not [e for e in store.events() if e.get("stage") == "receipts"]  # no round was judged
+    # after a new edit, the message is judged again
+    s = store.session()
+    s["edit_seq"] = 2
+    store.save_session(s)
+    receipts.stop_hook(store, "Added a docstring to trim.")
+    assert [e for e in store.events() if e.get("stage") == "receipts"]
+
+
+def test_a_home_path_is_scrubbed_however_it_is_escaped_or_cut_short(tmp_path):
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    import real_run
+    home = str(Path.home())
+    once, twice = home.replace("\\", "\\\\"), home.replace("\\", "\\\\\\\\")
+    cut = home + r"\AppData\Local\Temp\hm"  # a path cut short by a length limit
+    text = (f"a {cut} b {once}" + r"\\x" + f" c {twice}" + r"\\\\y" + f" d {Path.home().as_posix()}/z "
+            f"e {home.upper()}")
+    out = real_run.scrub(text, tmp_path)
+    assert Path.home().name.lower() not in out.lower().replace("<home>", "")
+    assert out.count("<home>") == 5
+
+
+def test_the_hall_pass_names_unverified_changes_left_in_the_tree_after_a_send_back(tmp_path, monkeypatch):
+    """eval/compare.py, Oct 4: an untested change Receipts sent back stayed in the repo; the Hall Pass said only
+    SENT BACK."""
+    from conftest import PASSING, FakeJev, make_repo
+    from hallmonitor import evidence as EV, jev, report
+    monkeypatch.setattr(jev, "ask", FakeJev(verdict=("says_nothing", 0.9)))
+    store = make_repo(tmp_path, {"app/__init__.py": "", "app/service.py": "def login(u):\n    return 'ok'\n"},
+                      config={"test_command": PASSING, "max_mutants": 0, "max_extreme_mutants": 0})
+    text = "def login(u):\n    if not u:\n        raise ValueError('empty')\n    return 'ok'\n"
+    (store.root / "app/service.py").write_text(text, encoding="utf-8")
+    EV.record({"tool": "write_file", "input": {"path": "app/service.py", "content": text}}, store)
+    result = receipts.verify(store, [{"claim": "login() rejects an empty username.", "evidence": ["E1"]}])
+    assert result["status"] == "send_back"
+    report.write_hall_pass(store)
+    page = (store.dir / "hall-pass.html").read_text(encoding="utf-8")
+    assert "Not verified yet" in page and "app/service.py" in page and "never rolls back by itself" in page

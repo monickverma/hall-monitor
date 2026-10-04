@@ -1,0 +1,4 @@
+{"ts": "2026-10-04T09:22:56+00:00", "t": 1791105776.4953825, "model": "jev-1.13.0", "qhash": "2f93ac582a", "stage": "session_start", "action": "brief", "decisions": 5, "tokens": 0, "lessons": null}
+{"ts": "2026-10-04T09:22:59+00:00", "t": 1791105779.0226665, "model": "jev-1.13.0", "qhash": "2f93ac582a", "stage": "brief", "action": "new_task", "decisions_added": [], "tokens": 6095, "ms": 1441}
+{"ts": "2026-10-04T09:23:04+00:00", "t": 1791105784.6315596, "model": "jev-1.13.0", "qhash": "2f93ac582a", "stage": "mcp_call", "tool": "list_decisions", "agent": null, "arg_keys": [], "claim_types": null}
+{"ts": "2026-10-04T09:23:23+00:00", "t": 1791105803.7801554, "model": "jev-1.13.0", "qhash": "2f93ac582a", "stage": "bob_run", "action": "success", "target": "bob run --mode supervised", "bob_stats": {"session_costs": 0.151578, "tool_calls": 4, "duration_ms": 29464}}
