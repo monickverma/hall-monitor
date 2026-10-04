@@ -3,7 +3,8 @@
 Usage:
   python scripts/setup_demo.py C:/hm-probe --probe    the probe: hooks record raw payloads (PROBE.md)
   python scripts/setup_demo.py C:/hm-demo             the real demo under Hall Monitor (BOB_RUNBOOK.md)
-Add --force to replace a folder that already exists.
+Add --force to replace a folder that already exists. Add --rules to start with the policy's rules already recorded,
+as every Bob Shell run does (scripts/real_run.py): for IDE checks, so Bob doesn't begin by re-reading the PDF.
 
 The hooks and the MCP server run from this Hall Monitor folder. Don't edit it while Bob runs the demo.
 """
@@ -17,7 +18,7 @@ sys.path.insert(0, str(HERE / "scripts"))
 import install  # noqa: E402
 
 
-def main(dest, probe=False, force=False):
+def main(dest, probe=False, force=False, rules=False):
     sys.stdout.reconfigure(encoding="utf-8")
     dest = Path(dest).resolve()
     if dest.exists():
@@ -34,6 +35,10 @@ def main(dest, probe=False, force=False):
     # install adds .hallmonitor/ to .gitignore; left uncommitted, it showed up as a change in every task's Receipts
     for args in (["add", ".gitignore"], ["commit", "-qm", "Ignore Hall Monitor's records"]):
         subprocess.run(git + args, cwd=dest, check=True)
+    if rules:  # real Bob IDE, Oct 4: with no rules recorded, AGENTS.md sent Bob to /decisions before every task
+        from real_run import POLICY_LEDGER, start_ledger
+        start_ledger(POLICY_LEDGER, dest)
+        print("The policy's rules are recorded (list_decisions shows them); tell Bob so in the prompt.")
     print(f"\nDemo repo ready: {dest}")
     print("Next: open it in Bob as a trusted workspace, then follow "
           + ("PROBE.md step 3." if probe else "BOB_RUNBOOK.md step 3."))
@@ -42,6 +47,6 @@ def main(dest, probe=False, force=False):
 if __name__ == "__main__":
     flags = {a for a in sys.argv[1:] if a.startswith("--")}
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    if len(args) != 1 or flags - {"--probe", "--force"}:
+    if len(args) != 1 or flags - {"--probe", "--force", "--rules"}:
         sys.exit(__doc__)
-    main(args[0], probe="--probe" in flags, force="--force" in flags)
+    main(args[0], probe="--probe" in flags, force="--force" in flags, rules="--rules" in flags)
