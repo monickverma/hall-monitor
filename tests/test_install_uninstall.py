@@ -60,3 +60,12 @@ def test_doctor_passes_a_fresh_install_and_names_what_is_missing(tmp_path):
     after = subprocess.run(doctor, capture_output=True, text=True, timeout=120)
     repo_lines = [l for l in after.stdout.splitlines() if l.startswith("[") and ("hook " in l or "MCP server" in l or "modes" in l)]
     assert repo_lines and all(l.startswith("[ok  ]") for l in repo_lines), after.stdout
+
+
+def test_uninstall_from_a_repo_with_no_bob_setup_of_its_own_leaves_no_bob_folder(tmp_path):
+    repo = tmp_path / "plain"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    install.main(repo)
+    install.uninstall(repo)
+    assert not (repo / ".bob").exists()

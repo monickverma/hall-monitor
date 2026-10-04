@@ -106,6 +106,13 @@ def uninstall(repo):
                 target.unlink()
         if (bob / sub).is_dir() and not any((bob / sub).iterdir()):
             (bob / sub).rmdir()
+    # Files that held only Hall Monitor's entries, and .bob/ itself if nothing else is in it
+    for name in ("settings.json", "mcp.json"):
+        p = bob / name
+        if p.exists() and json.loads(p.read_text(encoding="utf-8")) in ({}, {"mcpServers": {}}):
+            p.unlink()
+    if bob.is_dir() and not any(bob.iterdir()):
+        bob.rmdir()
     print(f"Hall Monitor removed from {bob}. Its records stay in {repo / '.hallmonitor'} (delete them by hand if you "
           "don't want them).")
 
