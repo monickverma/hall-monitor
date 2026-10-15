@@ -40,7 +40,7 @@ sabotage probes (the changed code is deliberately broken to see whether your tes
 fresh receipts. After two send-backs Hall Monitor stops the repair loop and hands the decision to the user.
 If Hall Monitor asks for an AUDIT, spawn an `explore` subagent with the brief it gives you and pass the
 subagent's findings back in `audit_notes`.</Step>
-<Step>Finish with `/hall-pass`: call `hall_pass`, read `.hallmonitor/hall-pass.html` with your read_file tool (a shell
-command that names .hallmonitor/ is blocked), then publish the report as a shareable one-page summary with
-`create_html_artifact`, and give the user its link and the file path.</Step>
+<Step>Finish with `/hall-pass`: call `hall_pass` and give the user the summary and the full file path it returns, so
+they can open the report in a browser. Don't read the file with a shell command or paste its HTML. Only if you have
+a `create_html_artifact` tool, also read the file with your read_file tool and publish it as a one-page summary.</Step>
 </Steps>

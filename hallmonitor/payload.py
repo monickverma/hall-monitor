@@ -4,6 +4,8 @@ Bob 2.0.2 has been observed sending both an IBM-docs shape ({event, tool, input}
 shape ({hook_event_name, tool_name, tool_input, ...}); accept either.
 """
 import json
+import re
+from pathlib import Path
 
 EDIT_TOOLS = {"write_file", "write_to_file", "apply_diff", "search_and_replace", "insert_content", "office_edit"}
 COMMAND_TOOLS = {"execute_command", "run_command", "shell"}
@@ -58,6 +60,41 @@ def assistant_text(p):
 
 def prompt(p):
     return text_of(first(p, "prompt", "user_prompt", "user_message", "message", default=""))
+
+
+# Bob IDE 2.2.1 expands a slash command before UserPromptSubmit: the prompt is the command file with its front matter
+# as plain lines, then what the user typed after the command (real Bob IDE, Oct 15):
+# "name: decisions\ndescription: '...'\nmetadata:\n\nUse the extract-decisions skill on $1. ...\n\n\ndocs/x.pdf"
+EXPANDED_RE = re.compile(r"\A\s*name:[ \t]*([\w.-]+)[ \t]*\n[ \t]*description:[ \t]*(.*)\n(?:[ \t]*metadata:.*\n)?")
+TYPED_RE = re.compile(r"\A\s*/([\w.-]+)(?:[ \t]+(.*?))?\s*\Z", re.S)
+
+
+def _command_body(root, name):
+    """The body of the command file `name`, after its front matter, if the repo has one in .bob/commands/."""
+    try:
+        text = (Path(root) / ".bob" / "commands" / f"{name}.md").read_text(encoding="utf-8")
+    except (OSError, TypeError):
+        return None
+    return re.sub(r"\A---\n.*?\n---\n", "", text, flags=re.S).strip() or None
+
+
+def slash_command(text, root=None):
+    """(name, description, what the user typed after it) when the prompt is a slash command, typed or as Bob expanded
+    it, else None. The body is the command's own wording, not something the user said in this conversation."""
+    m = TYPED_RE.match(text or "")
+    if m and (root is None or _command_body(root, m[1])):  # "/fix the login bug" is a request, not a command
+        return m[1], "", (m[2] or "").strip()
+    m = EXPANDED_RE.match(text or "")
+    if not m:
+        return None
+    rest = text[m.end():].strip()
+    body = _command_body(root, m[1]) if root else None
+    if body and body in rest:
+        args = rest[rest.index(body) + len(body):]
+    else:  # Bob puts what the user typed after the body, past two blank lines
+        parts = re.split(r"\n[ \t]*\n[ \t]*\n", rest)
+        args = parts[-1] if len(parts) > 1 else ""
+    return m[1], m[2].strip().strip("'\""), args.strip()
 
 
 def describe(tool_name, inp):

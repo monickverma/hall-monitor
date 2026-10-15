@@ -141,15 +141,18 @@ def targets(root, changes):
     return out
 
 
-def extreme(root, changes, cfg):
-    """Run the extreme mutants. Returns the keys Receipts adds to its sabotage evidence."""
+def extreme(root, changes, cfg, deadline=None):
+    """Run the extreme mutants. Returns the keys Receipts adds to its sabotage evidence. `deadline` (time.time())
+    shortens the pass's own budget, so a Receipts round answers Bob in time."""
     limit = int(cfg.get("max_extreme_mutants", 3))
     timeout = float(cfg.get("extreme_timeout", 60))
     found = targets(root, changes)[:max(limit, 0)]
     out = {"extreme_mutants": 0, "pseudo_tested": []}
     if not found:
         return {**out, "extreme_note": "no changed functions to test" if limit > 0 else "off"}
-    deadline = time.time() + 3 * timeout
+    deadline = min(time.time() + 3 * timeout, deadline or float("inf"))
+    if time.time() > deadline:
+        return {**out, "extreme_note": "time budget used up"}
     with tempfile.TemporaryDirectory(prefix="hm-extreme-", ignore_cleanup_errors=True) as tmp:
         gitutil.copy_tree(root, tmp)
         if not gitutil.run_tests(tmp, cfg["test_command"], timeout, copy=True)["passed"]:

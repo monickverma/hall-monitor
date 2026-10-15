@@ -7,7 +7,7 @@
 - **Declared intents, with excuses named:** before every edit or command Bob declares what it will do; Hall Monitor names rationalization patterns ("just this once", "it's faster", "the spirit of the rule allows it") and rejects them before anything runs.
 - **Receipts:** every claim Bob makes cites E-IDs from `list_evidence`. Code checks the receipts first — including whether every file a claim names actually exists in the repo (`unknown_file`, tier 0) — and then Jev checks them. Sabotage mutants run in a scratch copy of the repo (if the clean copy can't pass its tests, they run in place and each file is restored right after); extreme mutation (replacing a whole function body) finds pseudo-tested functions. Uncertain claims escalate to a read-only Bob auditor subagent, then to you. Hall Monitor stops and asks the user after 2 send-backs, naming the checkpoint to restore. A project rule that comes back "needs evidence" again on the same diff goes to you as a question instead of using up a send-back.
 - **Checkpoints:** a passing test run becomes a git checkpoint (`refs/hallmonitor/C<n>`), a state Bob can return to.
-- **The Hall Pass:** a one-page HTML report of the session. Hall Monitor writes it to `.hallmonitor/hall-pass.html`, and `/hall-pass` has Bob publish it with `create_html_artifact`.
+- **The Hall Pass:** a one-page HTML report of the session. Hall Monitor writes it to `.hallmonitor/hall-pass.html`, and `/hall-pass` has Bob give you its path and a summary (and publish it with `create_html_artifact` where Bob has that tool; Bob IDE 2.2.1 doesn't).
 
 Code rules decide what they can (protected folders, safe commands, dependencies, stale test runs, files that don't exist); TypeSafe's Jev judges the rest in one cheap parallel call. A whole supervised session costs about $0.003 of Jev.
 
@@ -41,7 +41,7 @@ Then:
 2. Switch to the **🛂 Supervised** mode.
 3. Run `/decisions docs/your-policy.pdf`, or `/decisions AGENTS.md` if your rules live in the repo's agent guidance.
 4. Give Bob the task. Bob declares intents, Hall Monitor judges them, and hooks enforce them.
-5. When Bob is done, it calls `submit_claims`, fixes whatever comes back unverified, and finishes with `/hall-pass` (Bob publishes the report with `create_html_artifact`). `/export-ledger docs/ledger.xlsx` writes the decisions and receipts to Excel with Bob's `office_edit`.
+5. When Bob is done, it calls `submit_claims`, fixes whatever comes back unverified, and finishes with `/hall-pass` (Bob gives you the report's path and a summary). `/export-ledger docs/ledger.xlsx` writes the decisions and receipts to Excel with Bob's `office_edit`.
 
 This installs, under `.bob/`: hooks (`settings.json`), the MCP server (`mcp.json`), two custom modes, four skills, five slash commands, and Plan-mode rules.
 
@@ -67,6 +67,8 @@ Runs **245 tests** with no API key needed. CI runs them on Ubuntu and Windows wi
 |---|---|---|
 | `max_extreme_mutants` | `3` | Functions tried for extreme mutation per claim; `0` turns it off |
 | `extreme_timeout` | `60` | Seconds per test run during extreme mutation |
+| `round_budget` | `45` | Seconds a `submit_claims` round may take. Bob IDE 2.2.1 waits 60 s for an MCP tool call, so probes are cut short and an unfinished Bob Shell audit keeps running in the background until Bob submits again |
+| `shell_audit_timeout` | `90` | Seconds for one Bob Shell audit |
 | `deep_review` | `false` | When `true`, Receipts requests explore-subagent reviews of the riskiest changed files after claims verify |
 
 ## Eval

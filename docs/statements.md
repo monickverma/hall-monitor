@@ -30,7 +30,7 @@ Hall Monitor runs on IBM Bob IDE 2.2.0 and Bob Shell 2.0.5. Every part of it use
 - **Custom modes**: the 🛂 Supervised mode grants read, edit, execute, MCP, skill, subagent, workflow, and todo groups. The 🔎 Receipts Auditor mode omits the edit group, so the auditor cannot alter the evidence it checks.
 - **Subagents** (`spawn_subagent`): every subagent brief is checked before it starts; the returned summary is checked for drift and surfaces as a flag in the next `declare_intent` result. Uncertain claims are audited by a read-only `explore` subagent.
 - **Bob Shell** (`bob run --format stream-json`): supervised headless runs as a CI gate, with Hall Monitor's hooks and MCP server active; each run's transcript and Bob's final answer are kept.
-- **`create_html_artifact`**: `/hall-pass` publishes the Hall Pass as a shareable Bob artifact.
+- **`create_html_artifact`**: where Bob has it, `/hall-pass` publishes the Hall Pass as a shareable Bob artifact. Bob IDE 2.2.1 has no such tool, so there `/hall-pass` gives the file's path.
 - **Skills and slash commands**: `/decisions`, `/receipts`, `/audit`, `/hall-pass`, and `/export-ledger`.
 
 **What Bob built in this repo** (from the table in BOB_RUNBOOK.md step 5):

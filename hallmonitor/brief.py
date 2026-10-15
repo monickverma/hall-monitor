@@ -12,6 +12,9 @@ LOG_LINE_RE = re.compile(r"^(\s{2,}\S|\t|Traceback \(|File \"|\s*at \S+\(|[A-Z]\
 SHORT_RULE_RE = re.compile(r"\b(no|not|only|never|don['’]t)\b", re.I)
 
 
+TASK_BASE = "refs/hallmonitor/task-base"
+
+
 def prose(text):
     return "\n".join(l for l in (text or "").splitlines() if not LOG_LINE_RE.match(l)).strip() or (text or "")
 
@@ -66,9 +69,11 @@ def session_start(p, store):
         for text, (kind, one_step) in zip(seeds, scoped):
             store.add_decision(text, "AGENTS.md", kind=kind, per_action=one_step)
     sess = store.session()
-    # A new session: rules the user stated in an earlier one no longer apply (store.active_decisions)
-    sess.update(base=gitutil.head(store.root), actions=[], commands=[], off_task_streak=0,
-                session_id=f"S{int(time.time() * 1000)}", user_rule_sentences=[], unjudged_sentences=[])
+    # A new session: rules the user stated in an earlier one no longer apply (store.active_decisions), and its claims
+    # are judged against the tree as it is now, the last task's uncommitted work included (gitutil.snapshot)
+    sess.update(base=gitutil.snapshot(store.root, TASK_BASE), agent_bases={}, actions=[], commands=[],
+                off_task_streak=0, session_id=f"S{int(time.time() * 1000)}", user_rule_sentences=[],
+                unjudged_sentences=[])
     store.save_session(sess)
     learned = lessons.brief_lines(store)  # v4.2: the last session's lessons, read before this one is logged
     store.log({"stage": "session_start", "action": "brief", "decisions": len(store.active_decisions()),
@@ -96,7 +101,11 @@ def user_prompt(p, store):
     t0 = time.time()
     text = P.prompt(p)
     sess = store.session()
-    sents = sentences(text, short_rules=True)
+    # A slash command (Bob expands it into the command file's text) carries on the session's task, and its wording is
+    # the command's, not the user's: only what the user typed after it can state a rule. Real Bob IDE, Oct 15: the
+    # Hall Pass's goal line showed the /hall-pass command's own text, which had become the session goal.
+    command = P.slash_command(text, store.root)
+    sents = sentences(command[2] if command else text, short_rules=True)
     # Kept before Jev is asked: if Jev refuses, the hook tells Bob to record the user's rules with record_decision,
     # and those must still count as the user's (ledger.said_by_user).
     sess["unjudged_sentences"] = sents
@@ -116,13 +125,18 @@ def user_prompt(p, store):
     answers, usage = jev.ask(state, qs)
     tok = jev.tokens(usage)
 
-    new_task = sess.get("goal") is None or answers["new_task"]["noul"] >= 0.5
+    new_task = sess.get("goal") is None or (not command and answers["new_task"]["noul"] >= 0.5)
     if new_task:
-        sess["goal"] = prose(text)[:600]
+        sess["goal"] = (" ".join(x for x in (f"/{command[0]}", command[2], command[1] and f"({command[1]})") if x)
+                        if command else prose(text))[:600]
         # A new task starts its own Receipts rounds. Real Bob, Sept 27: a task began one send-back from STUCK
         # because the count from the task before it (a /decisions turn) carried over.
         sess.update({"send_backs": 0, "last_send_back": None, "uncited_retry_used": False, "pending_audits": {},
                      "agent_pending_audits": {}, "audit_briefs": {}, "suspect_files": {}, "fresh_intent_needed": {}})
+        # ... and is judged against the tree as it is now, unless the last task left edits no round verified: then
+        # this may be that task going on, misread as a new one, and its claims are about those edits too.
+        if sess["edit_seq"] <= sess["verified_edit_seq"]:
+            sess.update(base=gitutil.snapshot(store.root, TASK_BASE) or sess.get("base"), agent_bases={})
     sess["stalls"] = 0  # the user has stepped in: the stall counter starts again
     # What the user said as rules (ledger.said_by_user): a looser bar than recording, since Bob may re-record one
     sess["user_rule_sentences"] = (sess.get("user_rule_sentences", []) +

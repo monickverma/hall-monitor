@@ -13,7 +13,9 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
@@ -167,6 +169,29 @@ def shell_audit(root, brief, max_cost="0.30", max_turns="8", timeout=40):
     if data.get("status") in ("unparsed", "timeout"):
         return None
     return str(data.get("last_message") or "")[:3000] or None
+
+
+# Audits running in the background, by key, so a Receipts round can answer Bob before its auditor finishes. Bob IDE
+# 2.2.1 gives an MCP tool call 60 s (its mcp.json `timeout`, in milliseconds, is unset), then restarts the server and
+# retries the call. Real Bob IDE, Oct 15: every audit round ran 60-94 s, so Bob saw "Error from Submit Claims", the
+# retry ran into the same wall, and Bob looped without ever seeing a verdict.
+_audits, _audits_lock, _pool = {}, threading.Lock(), []
+
+
+def audit_in_background(root, key, brief, timeout):
+    """The Future of shell_audit(root, brief) for `key`, started now unless one is already running or done."""
+    with _audits_lock:
+        if key not in _audits:
+            if not _pool:
+                _pool.append(ThreadPoolExecutor(max_workers=4, thread_name_prefix="hm-audit"))
+            _audits[key] = _pool[0].submit(shell_audit, root, brief, timeout=timeout)
+        return _audits[key]
+
+
+def forget_audit(key):
+    """Drop a finished audit once its result is used; the next round on a changed claim or diff starts a new one."""
+    with _audits_lock:
+        _audits.pop(key, None)
 
 
 def run_supervised(root, task, max_cost="2.00", max_turns="60", timeout=1800):
