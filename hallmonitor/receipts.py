@@ -31,7 +31,7 @@ count), and the Stop hook as a backstop.
 """
 import hashlib
 import json
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import wait
 import re
 import time
 from pathlib import Path
@@ -460,10 +460,30 @@ KIND_RULES = [
 ]
 
 
-def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main"):
+# A round's time (budget, from config round_budget) is shared out: sabotage and extreme mutation stop starting mutants
+# PROBE_RESERVE seconds before the end, which leaves Jev time to judge, and a background audit is waited on until
+# AUDIT_RESERVE seconds before the end, which leaves Jev time to judge again with its findings.
+PROBE_RESERVE = 20
+AUDIT_RESERVE = 6
+
+
+def audit_key(root, agent, claim, diff_id):
+    return hashlib.sha1(json.dumps([str(root), agent, claim, diff_id]).encode()).hexdigest()[:16]
+
+
+def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main", budget=None):
+    """One Receipts round. With `budget` (seconds; the MCP tool passes config round_budget) the round answers within
+    about that long: probes are cut short, and a Bob Shell audit that hasn't finished keeps running in the background
+    and is picked up when Bob submits again (status "audit", the claim "audit running")."""
     t0 = time.time()
+    deadline = t0 + budget if budget else None
     EV.settle_pending(store, agent=agent)  # a test run that failed is a receipt, though Bob never reported it back
     cfg, sess = store.config(), store.session()
+    # What the claims are judged against: the tree as it was when the task began (brief.TASK_BASE), or when this
+    # subagent began (step.agent_base_ref). Real Bob IDE, Oct 15: judged against HEAD, a docstring subagent's "no
+    # behavior changes" took in the last task's uncommitted rate-limit work, came back CONTRADICTED and ended STUCK.
+    since = (sess.get("agent_bases") or {}).get(agent) if agent != "main" else None
+    since = since or sess.get("base")
     parsed = parse(claims_or_summary)
     tok = 0
     claims = []
@@ -482,7 +502,7 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
             claims.append({"claim": text, "kind": kind, "cited": cited, "from": "agent"})
     # .bob/ and .hallmonitor/ are Hall Monitor's own (installed after the base commit in a demo repo), and
     # Bob can't write them: real Bob, Sept 27, they were the only "code" in a docs task's diff.
-    all_changes = {f: c for f, c in gitutil.changes(store.root, sess.get("base")).items()
+    all_changes = {f: c for f, c in gitutil.changes(store.root, since).items()
                    if not is_protected(store.root, f)}
     # Obligations from the ledger are implicit claims: the finished work must satisfy them. With no work for them
     # to apply to, they're skipped: real Bob, Sept 27, a /decisions turn was asked to prove "Changes to
@@ -521,8 +541,9 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
     cmd = own_test_command(cfg["test_command"], claims, known, store.root) if agent != "main" else None
     cmd = cmd or cfg["test_command"]
     tests = gitutil.run_tests(store.root, cmd)
+    at = {"tests": time.time()}  # when each stage ended, logged so a slow round shows where its time went
     # Files whose changes are only docstrings, comments or blank lines: editing them can't make a test run stale.
-    inert = {f for f, ch in all_changes.items() if not gitutil.behavior_lines(store.root, sess.get("base"), {f: ch})}
+    inert = {f for f, ch in all_changes.items() if not gitutil.behavior_lines(store.root, since, {f: ch})}
 
     for c in claims:
         # A header's files tell where an item is; they aren't what a claim that something stayed the
@@ -538,10 +559,10 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
         about_rules = recorded_decisions(c["claim"], decisions) if c["from"] == "agent" else None
         if c["from"] == "ledger":
             about_rules = not_applicable(c["rule"], named_files(c["rule"], known), all_changes, store.root) or \
-                no_behavior_change(c["rule"], store.root, sess.get("base"), changes)
+                no_behavior_change(c["rule"], store.root, since, changes)
         cert = about_rules if c["from"] == "ledger" else about_rules or \
             certify(c["kind"], c["cited"], c["named"], all_changes, ledger, tests,
-                    FB.unknown_files(store.root, sess.get("base"), c["claim"], known),  # v4.2 fabricated files
+                    FB.unknown_files(store.root, since, c["claim"], known),  # v4.2 fabricated files
                     own=c["named"] if agent != "main" and c["named"] else None, inert=inert)
         if cert and cert[1] == "uncited" and not free_retry:
             cert, c["uncited_fallback"] = None, True  # after the free retry: judged the old way, marked uncited
@@ -550,13 +571,17 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
     to_judge = [i for i, c in enumerate(claims) if c["cert"] is None]
     needs_sabotage = tests["passed"] and any(claims[i]["kind"] in SABOTAGE_KINDS for i in to_judge)
     mine = {f: ch for f, ch in changes.items() if f in own_files(claims, known)} if agent != "main" else {}
-    sab = gitutil.sabotage(store.root, mine or changes, cmd, cfg["max_mutants"]) if needs_sabotage \
-        else {"mutants": 0, "killed": 0, "survived": [], "note": "not run"}
+    probes_by = deadline and deadline - PROBE_RESERVE
+    sab = gitutil.sabotage(store.root, mine or changes, cmd, cfg["max_mutants"], deadline=probes_by) \
+        if needs_sabotage else {"mutants": 0, "killed": 0, "survived": [], "note": "not run"}
     changed_files = {f: c["status"] for f, c in changes.items()}
     if needs_sabotage:  # v4.2 extreme mutation (mutation.py): pseudo-tested functions join the sabotage evidence
-        sab = {**sab, **mutation.extreme(store.root, mine or changes, {**cfg, "test_command": cmd})}
-        # Fail-before/pass-after: do the changed tests fail on the code as it was before the change?
-        before = gitutil.fail_before(store.root, sess.get("base"), changes, cmd)
+        sab = {**sab, **mutation.extreme(store.root, mine or changes, {**cfg, "test_command": cmd},
+                                         deadline=probes_by)}
+        # Fail-before/pass-after: do the changed tests fail on the code as it was before the change? (Skipped when the
+        # round's time for probes is up.)
+        before = None if probes_by and time.time() > probes_by else \
+            gitutil.fail_before(store.root, since, changes, cmd)
         if before:
             sab = {**sab, "tests_on_code_before_change": before}
             # A rule that tests must fail without the change is exactly this check, so code decides it.
@@ -568,6 +593,8 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
             for i in [i for i in to_judge if ASSERTS_CHANGE_RE.search(claims[i].get("rule") or "")]:
                 claims[i]["cert"] = tests_catch_change(before, sab)
             to_judge = [i for i in to_judge if claims[i]["cert"] is None]
+
+    at["probes"] = time.time()
 
     # The same claim, with the same citations, on the same diff gets the same verdict as in an earlier round, so
     # resubmitting can't re-roll Jev, in either direction. Real Bob, Sept 27 (subagents, $2.51): "Added 7 new
@@ -630,17 +657,32 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
             answers[i], decisions[i], tiers[i] = r[0], judge(r[0], cfg["bob_audit_cost"]), "jev_deep"
             tok += jev.tokens(r[1])
 
+    at["jev"] = time.time()
+
     # Tier 3: still worth more scrutiny -> an independent Bob audit (Bob Shell if installed, else ask
     # the supervised Bob to spawn a read-only explore subagent and resubmit with its findings).
-    # The Bob Shell audits run in parallel within one time budget, so the round still answers Bob's submit_claims
-    # call in time; an audit that runs out of time falls back to the explore subagent.
-    audits = []
+    # The Bob Shell audits run in parallel, in the background (bob.audit_in_background), and the round waits for them
+    # only as long as its budget allows. One still running is picked up when Bob submits the same claims again; one
+    # that fails or runs out of its own time falls back to the explore subagent.
+    audits, running = [], []
     deep = [i for i in answers if tiers[i] == "jev_deep" and decisions[i].escalate]
     briefs = {i: audit_brief(claims[i]["claim"], changed_files, tests, sab) for i in deep}
-    with ThreadPoolExecutor(max_workers=max(len(deep), 1)) as pool:
-        found = dict(zip(deep, pool.map(lambda i: bob.shell_audit(store.root, briefs[i],
-                                                                  timeout=cfg["shell_audit_timeout"]), deep)))
+    keys = {i: audit_key(store.root, agent, claims[i]["claim"], diff_id) for i in deep}
+    jobs = {i: bob.audit_in_background(store.root, keys[i], briefs[i], cfg["shell_audit_timeout"]) for i in deep}
+    if jobs:
+        wait(list(jobs.values()), timeout=deadline and max(0.0, deadline - AUDIT_RESERVE - time.time()))
+    found = {}
     for i in deep:
+        if not jobs[i].done():
+            running.append({"index": i, "claim": claims[i]["claim"]})
+            continue
+        bob.forget_audit(keys[i])
+        try:
+            found[i] = jobs[i].result()
+        except Exception as e:  # an audit that crashed is no audit: the explore subagent takes over
+            store.log({"stage": "error", "tool": "bob_shell_audit", "error": repr(e)})
+            found[i] = None
+    for i in found:
         if found[i]:
             audit_notes[i] = found[i]
             try:
@@ -652,6 +694,7 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
         else:
             audits.append({"index": i, "claim": claims[i]["claim"], "brief": briefs[i]})
 
+    at["audit"] = time.time()
     rows = []
     for i, c in enumerate(claims):
         base = {"index": i, "claim": c["claim"], "kind": c["kind"], "cited": c["cited"], "named": c["named"]}
@@ -671,15 +714,19 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
                          "detail": "Hall Monitor couldn't check this claim. Ask the user to review it."})
             continue
         a, d = answers[i], decisions[i]
-        if any(x["index"] == i for x in audits):
+        code, detail = ("uncited" if c.get("uncited_fallback") else None), ""
+        if any(x["index"] == i for x in running):
+            state, action, code = "cant_check", "audit", "audit_running"
+            detail = ("Hall Monitor's own auditor (Bob Shell) is still checking this claim. Call submit_claims again "
+                      "with the same claims to get its verdict; don't spawn a subagent for it.")
+        elif any(x["index"] == i for x in audits):
             state, action = "cant_check", "audit"
         elif d.action in ("accept", "flag"):
             state, action = "verified", d.action
         else:
             state, action = ("contradicted" if a["verdict"]["choice"] == "contradicts" else "needs_evidence"), \
                 "send_back"
-        rows.append({**base, **d.as_dict(), "state": state, "action": action,
-                     "code": "uncited" if c.get("uncited_fallback") else None, "detail": "",
+        rows.append({**base, **d.as_dict(), "state": state, "action": action, "code": code, "detail": detail,
                      "verdict": a["verdict"]["choice"], "confidence": round(a["verdict"]["confidence"], 2),
                      "shows_false": round(a["false"]["noul"], 2), "tier": tiers[i]})
     risky = [(st["change"]["file"], round(r[0]["risk"]["score"], 2))
@@ -708,7 +755,8 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
 
     bad = [r for r in rows if r["action"] == "send_back"]
     free = bool(bad) and free_retry and all(r["code"] == "uncited" and r["tier"] == "code" for r in bad)
-    status = "needs_evidence" if free else "send_back" if bad else "audit" if audits or refused or asked else "accept"
+    status = "needs_evidence" if free else "send_back" if bad else "audit" if audits or running or refused or asked \
+        else "accept"
 
     sess = store.session()
     if agent == "main":  # the project's rules are checked on the main agent's rounds only
@@ -761,7 +809,8 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
 
     cps = EV.checkpoints(store.evidence())
     result = {"rows": rows, "tests": tests, "sabotage": sab, "risky_files": risky, "audits": audits,
-              "status": status, "send_backs": sess["send_backs"], "checkpoint": cps[-1] if cps else None}
+              "running_audits": running, "status": status, "send_backs": sess["send_backs"],
+              "checkpoint": cps[-1] if cps else None}
     store.write_report("receipts.md", report(result))
     store.write_report("receipts.json", json.dumps(result, indent=2))
     store.log({"stage": "receipts", "source": source, "agent": agent, "claims": len(rows), "action": status,
@@ -769,7 +818,8 @@ def verify(store, claims_or_summary, audit_notes=None, source="mcp", agent="main
                "codes": {r["claim"][:80]: r["code"] for r in rows if r["code"]},
                "tiers": [r["tier"] for r in rows], "risky_files": risky, "send_backs": sess["send_backs"],
                "ignored_audit_notes": len(offered) - len(audit_notes) or None,
-               "mutants": sab["mutants"], "survived": len(sab["survived"]),
+               "mutants": sab["mutants"], "survived": len(sab["survived"]), "audits_running": len(running) or None,
+               "stage_ms": {k: int((v - t0) * 1000) for k, v in at.items()},
                "tokens": tok, "ms": int((time.time() - t0) * 1000)})
     return result
 
@@ -817,6 +867,7 @@ def message(result):
             "needs_evidence": "Receipts: some claims don't cite their receipts yet. "
                               "This round doesn't count as a send-back.",
             "audit": "Receipts: some claims need an independent audit." if result["audits"] else
+                     "Receipts: an independent audit is still running." if result.get("running_audits") else
                      "Receipts: some claims need the user's answer.",
             "stuck": f"Receipts: STUCK. Claims have now been sent back {result['send_backs']} times. "
                      "Stop repairing and tell the user:"}[status]]
@@ -839,6 +890,9 @@ def message(result):
         out.append("Call list_evidence, then resubmit each claim with the IDs of the receipts that prove it.")
     elif status == "stuck":
         out.append(restore_advice(result.get("checkpoint")))
+    if result.get("running_audits"):
+        out.append("AUDIT RUNNING for claim " + ", ".join(str(a["index"]) for a in result["running_audits"]) +
+                   ": call submit_claims again with the same claims to get the verdict.")
     for a in result["audits"]:
         out.append(f"AUDIT NEEDED for claim {a['index']}: spawn an `explore` subagent with this brief, then "
                    f"call submit_claims again with audit_notes {{\"{a['index']}\": <its findings>}}:\n{a['brief']}")

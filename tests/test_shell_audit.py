@@ -96,7 +96,7 @@ def test_a_rounds_audits_run_at_once_within_the_time_budget(tmp_path, monkeypatc
               {"claim": "limit() in app/rl.py now returns 5.", "evidence": ["E1"]}]
     rows = receipts.verify(store, claims)["rows"]
     assert [r["tier"] for r in rows] == ["bob_shell_audit", "bob_shell_audit"]
-    assert peak[0] == 2 and budgets == [40, 40]
+    assert peak[0] == 2 and budgets == [90, 90]
 
 
 def test_the_mcp_server_gets_the_bob_key_by_reference(monkeypatch):

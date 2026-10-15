@@ -114,13 +114,33 @@ def names_protected(command):
     return False
 
 
+# PowerShell keeps a read in a variable and prints it: `$html = Get-Content x -Raw; Write-Output $html`.
+VAR_ASSIGN_RE = re.compile(r"^\s*\$[A-Za-z_]\w*\s*=\s*")
+VAR_PRINT_RE = re.compile(r"^\s*((write-output|write-host|echo)\s+)?\$[A-Za-z_]\w*\s*$", re.I)
+
+
+def only_reads(command, starts_safe):
+    """Every statement of `command` (split at `;` and newlines) only reads: a command `starts_safe` accepts, optionally
+    piped through read-only filters, kept in a variable or not (`$x = Get-Content f`), or a variable printed
+    (`Write-Output $x`). No redirect, `&`/`&&` chaining, substitution or block anywhere. Real Bob IDE, Oct 15:
+    `$html = Get-Content '.hallmonitor/hall-pass.html' -Raw; Write-Output $html` was stopped as a command that changes
+    Hall Monitor's configuration, while `Get-Content .hallmonitor\\hall-pass.html -Raw` was allowed as safe."""
+    stmts = [s for s in re.split(r"[;\n]", STREAM_MERGE_RE.sub("", command or "")) if s.strip()]
+    for stmt in stmts:
+        if VAR_PRINT_RE.match(stmt):
+            continue
+        stmt = VAR_ASSIGN_RE.sub("", stmt, count=1)
+        if not stmt.strip() or UNSAFE_SHELL_RE.search(stmt):
+            return False
+        first, *rest = stmt.split("|")
+        if not (starts_safe(first) and all(PIPE_FILTER_RE.match(p) for p in rest)):
+            return False
+    return bool(stmts) and not all(VAR_PRINT_RE.match(s) for s in stmts)
+
+
 def is_plain_read(command):
-    """One read-only command, optionally piped through read-only filters, with no redirect, chaining or substitution."""
-    cmd = STREAM_MERGE_RE.sub("", command or "")
-    if not cmd.strip() or UNSAFE_SHELL_RE.search(cmd):
-        return False
-    first, *rest = cmd.split("|")
-    return bool(READ_ONLY_RE.match(first)) and all(PIPE_FILTER_RE.match(p) for p in rest)
+    """Read-only commands, optionally piped through read-only filters, with no redirect, chaining or substitution."""
+    return only_reads(command, READ_ONLY_RE.match)
 
 
 def touches_protected(command):
@@ -133,12 +153,9 @@ def is_safe_command(cfg, command):
     """The command is one the config calls safe (tests, git status, plain reads), optionally piped through read-only
     filters, and nothing else. Real Bob, Sept 27-28: `Get-Content tests\\test_service.py` was blocked for want of a
     declared intent."""
-    cmd = STREAM_MERGE_RE.sub("", command or "")
-    if not cmd.strip() or UNSAFE_SHELL_RE.search(cmd) or touches_protected(command):
-        return False
-    first, *rest = cmd.split("|")
     safe = cfg["safe_commands"]
-    return bool(re.match(safe, first) or READ_ONLY_RE.match(first)) and all(PIPE_FILTER_RE.match(p) for p in rest)
+    return not touches_protected(command) and \
+        only_reads(command, lambda first: re.match(safe, first) or READ_ONLY_RE.match(first))
 
 
 def other_tool(p, store):
@@ -323,12 +340,22 @@ def explain(store, d, detail):
 VERDICT = {"allow": "approved", "rebrief": "approved_with_note", "block": "rejected", "ask_human": "ask_human"}
 
 
+def agent_base_ref(agent):
+    """Where a subagent's starting tree is kept: refs/hallmonitor/agent/<its name, made safe for a ref>."""
+    return "refs/hallmonitor/agent/" + (re.sub(r"[^\w-]+", "-", agent).strip("-") or "subagent")
+
+
 def declare_intent(store, intent, files=(), commands=(), agent="main", agent_task=None):
     """MCP tool: judge a plan of action before any tool runs; the answer goes straight back to Bob.
     (Pending notes and flags are put in front of every MCP result by the MCP server.)"""
     t0 = time.time()
     evidence.settle_pending(store, agent=agent)  # this agent's failed command, if any, before its next intent is judged
     cfg, sess = store.config(), store.session()
+    if agent != "main" and agent not in sess.setdefault("agent_bases", {}):
+        # A subagent's claims are judged against the tree as it was when it began, before its first edit (it can't
+        # edit before an approved intent), so the main agent's and earlier subagents' work isn't taken for its own.
+        sess["agent_bases"][agent] = gitutil.snapshot(store.root, agent_base_ref(agent))
+        store.save_session(sess)
     files = [rel_path(store.root, f) for f in files or []]
     commands = [evidence.repo_command(store.root, c) for c in commands or []]
     target = ", ".join(files + commands)

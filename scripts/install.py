@@ -141,8 +141,9 @@ def main(repo, probe=False):
         merge_json(bob / "settings.json", hooks(HERE / "scripts" / "probe_hook.py", ".*", pre_timeout=10))
     else:
         merge_json(bob / "settings.json", hooks(HERE / "hm_hook.py", TOOLS))
-    # Only fields listed for .bob/mcp.json in the rulesync Bob target (#3011). No timeout: its unit is
-    # unverified, and a wrong unit would cut off Jev calls.
+    # Only fields listed for .bob/mcp.json in the rulesync Bob target (#3011). No timeout. Bob IDE 2.2.1's extension
+    # (read Oct 15) takes `timeout` in milliseconds and waits 60 s when it's unset, then restarts the server and retries
+    # the call once. A Receipts round fits in that by itself (config round_budget), and Bob Shell's unit is unverified.
     # Bob starts the server without the user's environment (probe, Sept 27; Linux container, Sept 27), but
     # expands ${env:NAME} in mcp.json from its own (Bob Shell 2.0.5 docs). A reference, never the key.
     merge_json(bob / "mcp.json", {"mcpServers": {"hall-monitor": {

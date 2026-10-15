@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import tokenize
 from pathlib import Path
 
@@ -32,9 +33,7 @@ def checkpoint(root, n, last_tree=None):
     last checkpoint (`last_tree`) or this isn't a git repository.
     """
     root = Path(root)
-    env = {"GIT_INDEX_FILE": str(root / ".hallmonitor" / "cp.index"),
-           "GIT_AUTHOR_NAME": "Hall Monitor", "GIT_AUTHOR_EMAIL": "hall-monitor@localhost",
-           "GIT_COMMITTER_NAME": "Hall Monitor", "GIT_COMMITTER_EMAIL": "hall-monitor@localhost"}
+    env = {"GIT_INDEX_FILE": str(root / ".hallmonitor" / "cp.index"), **AUTHOR}
     parent = head(root)
     if parent:
         git(root, "read-tree", "HEAD", env=env)
@@ -51,6 +50,51 @@ def checkpoint(root, n, last_tree=None):
     return {"ref": ref, "commit": commit, "tree": tree}
 
 
+AUTHOR = {"GIT_AUTHOR_NAME": "Hall Monitor", "GIT_AUTHOR_EMAIL": "hall-monitor@localhost",
+          "GIT_COMMITTER_NAME": "Hall Monitor", "GIT_COMMITTER_EMAIL": "hall-monitor@localhost"}
+
+
+def worktree_tree(root):
+    """The working tree as a git tree (tracked plus untracked, not ignored), or None. Written through a scratch copy of
+    the index, so the real index, the branch and the working tree are never touched, and git reuses the index's file
+    stats instead of hashing every file again."""
+    with tempfile.TemporaryDirectory(prefix="hm-index-", ignore_cleanup_errors=True) as tmp:
+        index = Path(tmp) / "index"
+        real = Path(root) / git(root, "rev-parse", "--git-path", "index").strip()
+        if real.is_file():
+            shutil.copyfile(real, index)
+        env = {"GIT_INDEX_FILE": str(index)}
+        git(root, "add", "-A", env=env)
+        return git(root, "write-tree", env=env).strip() or None
+
+
+def snapshot(root, ref):
+    """The tree as it is now, uncommitted work included, as a commit on HEAD kept under `ref`: what a new task's or a
+    subagent's claims are judged against. HEAD itself when nothing is uncommitted; None before the first commit.
+    Real Bob IDE, Oct 15: a docstring task started with the last task's rate-limit work still uncommitted, and judged
+    against HEAD, its "docstrings only, no behavior changes" came back CONTRADICTED until the task was STUCK."""
+    parent = head(root)
+    tree = worktree_tree(root) if parent else None
+    if not tree or tree == git(root, "rev-parse", "HEAD^{tree}").strip():
+        return parent
+    commit = git(root, "commit-tree", tree, "-p", parent, "-m", f"hall monitor base {ref}", env=AUTHOR).strip()
+    if not commit:
+        return parent
+    git(root, "update-ref", ref, commit)
+    return commit
+
+
+def diff_args(root, base):
+    """What `git diff` compares to see the changes since `base`. Against HEAD, the working tree (untracked files are
+    added by the caller). Against an older commit, such as a snapshot() with work that was untracked then, the working
+    tree's own tree, so a file untracked then and now is compared, not shown as deleted and new."""
+    if base and base != head(root):
+        tree = worktree_tree(root)
+        if tree:
+            return ["--no-renames", base, tree]
+    return [base or "HEAD", "--"]
+
+
 def diff_from(root, ref):
     """What changed in the working tree since a checkpoint (tracked files)."""
     return git(root, "diff", ref)
@@ -63,12 +107,17 @@ def changes(root, base):
     "removed_lines": [text]}}.
     """
     out = {}
-    cur = None
-    for line in git(root, "diff", "--unified=0", base or "HEAD", "--").splitlines():
-        if line.startswith("+++ "):
+    cur, born = None, False
+    args = diff_args(root, base)
+    trees = args[-1] != "--"
+    for line in git(root, "diff", "--unified=0", *args).splitlines():
+        if line.startswith("--- "):
+            born = line.endswith("/dev/null")
+        elif line.startswith("+++ "):
             cur = None if line.endswith("/dev/null") else line[6:]
             if cur:
-                out.setdefault(cur, {"status": "modified", "added": [], "removed": 0, "removed_lines": []})
+                out.setdefault(cur, {"status": "new" if trees and born else "modified", "added": [], "removed": 0,
+                                     "removed_lines": []})
         elif line.startswith("@@") and cur:
             new_start = int(re.match(r"@@ -\S+ \+(\d+)", line)[1])
             out[cur]["_next"] = new_start
@@ -79,7 +128,8 @@ def changes(root, base):
         elif cur and line.startswith("-") and not line.startswith("---"):
             out[cur]["removed"] += 1
             out[cur]["removed_lines"].append(line[1:])
-    for f in git(root, "ls-files", "--others", "--exclude-standard").splitlines():
+    untracked = [] if trees else git(root, "ls-files", "--others", "--exclude-standard").splitlines()
+    for f in untracked:  # already in the diff when it compares trees
         p = Path(root) / f
         if p.is_file():
             try:
@@ -213,10 +263,10 @@ def inert_lines(text):
     return rows
 
 
-def _removed(root, base, path):
-    """(line number at `base`, text) of each line removed from `path` since `base`."""
+def _removed(root, args, path):
+    """(line number at the base, text) of each line removed from `path` since the base (`args`: diff_args)."""
     out, n = [], None
-    for line in git(root, "diff", "--unified=0", base, "--", path).splitlines():
+    for line in git(root, "diff", "--unified=0", *args, *([] if args[-1] == "--" else ["--"]), path).splitlines():
         if line.startswith("@@"):
             n = int(re.match(r"@@ -(\d+)", line)[1])
         elif n is not None and line.startswith("-") and not line.startswith("---"):
@@ -230,11 +280,13 @@ def behavior_lines(root, base, changes_):
     removed line except blank lines, comments and docstrings. Other files count whole, except dotfiles such as
     .gitignore. Real Bob, Sept 27: a task that only added a docstring to app/__init__.py was held to "Every
     behavior change must ship with a test that fails without the change", and Jev contradicted it."""
-    out = []
+    out, args = [], None
     for path, c in changes_.items():
         if is_test(path) or Path(path).name.startswith("."):
             continue
-        removed = _removed(root, base, path) if c["status"] == "modified" else []
+        if c["status"] == "modified" and args is None:
+            args = diff_args(root, base)
+        removed = _removed(root, args, path) if c["status"] == "modified" else []
         if not path.endswith(".py"):
             out += [(path, n) for n, _ in c["added"]] + [(path, -n) for n, _ in removed]
             continue
@@ -269,14 +321,15 @@ def plan_mutants(root, changes_, max_mutants=4):
     return plan
 
 
-def sabotage(root, changes_, cmd, max_mutants=4):
+def sabotage(root, changes_, cmd, max_mutants=4, deadline=None):
     """Break changed source lines one at a time and rerun the tests.
 
     A surviving mutant (tests still pass on broken code) means the tests do not check that code.
     The mutants run in a scratch copy of the repository, so the working tree is never touched: a
     parallel subagent can't read a mutated file or lose an edit to the restore, the IDE never shows a
     file flicker, and a hook killed mid-run can't leave a mutant behind. If the unmutated copy fails its
-    tests (a file the tests need is ignored by git, say), no mutants run.
+    tests (a file the tests need is ignored by git, say), no mutants run. Past `deadline` (time.time()) no further
+    mutant starts, so a Receipts round answers Bob in time; the ones run still count.
     """
     plan = plan_mutants(root, changes_, max_mutants)
     if not plan:
@@ -291,6 +344,8 @@ def sabotage(root, changes_, cmd, max_mutants=4):
             return {"mutants": 0, "killed": 0, "survived": [], "skipped": "the tests don't pass in a clean copy"}
         where, in_copy = tmp, True
         for path, lineno, text, mutated in plan:
+            if deadline and time.time() > deadline:
+                break
             p = Path(where) / path
             original = p.read_text(encoding="utf-8")
             lines = original.splitlines(keepends=True)
@@ -302,4 +357,7 @@ def sabotage(root, changes_, cmd, max_mutants=4):
             results.append({"file": path, "line": lineno, "from": text.strip(),
                             "to": mutated.strip(), "killed": killed})
     survived = [r for r in results if not r["killed"]]
-    return {"mutants": len(results), "killed": len(results) - len(survived), "survived": survived}
+    out = {"mutants": len(results), "killed": len(results) - len(survived), "survived": survived}
+    if len(results) < len(plan):
+        out["note"] = f"time budget used up after {len(results)} of {len(plan)} mutants"
+    return out

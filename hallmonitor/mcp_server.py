@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import traceback
+from pathlib import Path
 
 from . import evidence, jev, ledger, receipts, report, review, step
 from .hook import repo_root
@@ -112,14 +113,18 @@ def _call(name, args, store):
             return "No unexplained blocks. If a tool was blocked, declare an intent for it with declare_intent first."
         return "\n\n".join(f"{b['tool']} on {b['target']}:\n{b['reason']}" for b in blocks)
     if name == "submit_claims":  # deep review (review.py) passes the result through unless config deep_review is on
-        result = receipts.verify(store, args["claims"], args.get("audit_notes"), agent=args.get("agent") or "main")
+        result = receipts.verify(store, args["claims"], args.get("audit_notes"), agent=args.get("agent") or "main",
+                                 budget=store.config()["round_budget"])
         return review.message(review.after_verify(store, result, args.get("review_notes")))
     if name == "hall_pass":
         path, summary = report.write_hall_pass(store)
-        # Real Bob Shell, Oct 4: Bob read the report with a shell command (`$html = Get-Content ...hall-pass.html; ...`),
-        # which names Hall Monitor's records, and Hall Monitor stopped its own protocol's last step three times.
-        return (f"{summary}\nHall Pass: {path}\nRead it with your read_file tool (a shell command that names "
-                ".hallmonitor/ is blocked), then publish it.")
+        # The path is the deliverable. Real Bob IDE 2.2.1, Oct 15: it has no create_html_artifact tool, so asked to
+        # publish the report Bob printed a raw <html_artifact> tag, then read the file with Get-Content again and
+        # again, each read waiting on the user's approval. (Real Bob Shell, Oct 4: the same reads were stopped.)
+        return (f"{summary}\nHall Pass: {Path(path).resolve()}\nGive the user this summary and the full path above; "
+                "they open the file in a browser. That finishes the task: don't read the file with a shell command or "
+                "paste its HTML. Only if you have a create_html_artifact tool, also read the file with read_file and "
+                "publish it.")
     raise ValueError(f"unknown tool {name}")
 
 
